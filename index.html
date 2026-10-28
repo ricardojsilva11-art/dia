@@ -462,6 +462,8 @@ async function syncNow(manual){
     const before = JSON.stringify(payload());
     const j = await api("/api/sync", {data:payload()});
     S = mergeState(S, j.data);
+    const d = j.data || {}, n = c => (d[c] || []).filter(x => !x.del).length;
+    S.local.sync.server = {tarefas:n("tarefas"), gastos:n("gastos"), treinos:n("treinos"), refeicoes:n("refeicoes"), venc:!!d.venc};
     S.local.sync.last = Date.now(); S.local.sync.err = "";
     persist();
     if (JSON.stringify(payload()) !== before) softRender();
@@ -469,12 +471,13 @@ async function syncNow(manual){
   }catch(e){
     S.local.sync.err = String(e.message || e); persist();
     if (manual) toast("Não consegui sincronizar: " + S.local.sync.err);
-  }finally{ syncBusy = false; refreshSyncUI(); }
+  }finally{ syncBusy = false; refreshSyncUI(); if (route() === "definicoes") softRender(); }
 }
 /* não redesenha enquanto se escreve num campo */
 function softRender(){
   const a = document.activeElement;
-  if (a && a.closest && a.closest("#view") && /INPUT|TEXTAREA|SELECT/.test(a.tagName)) { pendingRender = true; return; }
+  /* só espera se estiveres a meio de escrever alguma coisa */
+  if (a && a.closest && a.closest("#view") && /INPUT|TEXTAREA/.test(a.tagName) && !/checkbox|radio|file/.test(a.type) && a.value) { pendingRender = true; return; }
   if ($("#dlg").open) { pendingRender = true; return; }
   render();
 }
@@ -1182,6 +1185,7 @@ function vDef(){
       <label class="field">Código pessoal<input data-c="sync" data-k="code" value="${esc(sy.code)}" placeholder="XXXX-XXXX-XXXX-XXXX" autocomplete="off" spellcheck="false"></label>
       <div style="display:flex;gap:8px;flex-wrap:wrap"><button class="btn ghost sm" type="button" data-a="gen-code">Gerar código novo</button><button class="btn sm" type="button" data-a="sync-now" ${syncOn() ? "" : "disabled"}>Sincronizar agora</button></div>
       ${sy.err ? `<span class="small" style="color:var(--red)">${esc(sy.err)}</span>` : sy.last ? `<span class="xs muted">Última sincronização: ${new Date(sy.last).toLocaleString("pt-PT")}</span>` : ""}
+      ${sy.code ? `<div class="small" style="background:var(--soft);border-radius:12px;padding:10px 12px">Para confirmar que os dois aparelhos usam o mesmo código: este termina em <b class="mono">${esc(sy.code.slice(-4))}</b>.${sy.server ? ` No servidor, com este código, estão <b>${sy.server.tarefas}</b> tarefas, <b>${sy.server.gastos}</b> gastos, <b>${sy.server.refeicoes}</b> refeições e <b>${sy.server.treinos}</b> treinos.` : ""}</div>` : ""}
     </section>
 
     <section class="card">
