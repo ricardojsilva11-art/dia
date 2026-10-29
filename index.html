@@ -220,6 +220,15 @@ svg{flex-shrink:0}
 .day.today{border:2px solid var(--ink)}
 .day .n{font-size:12px; font-weight:700; color:var(--muted)}
 .day .evs{font-size:11px; color:var(--violet-ink); font-weight:700; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; max-width:100%}
+.day.tday{min-height:72px; position:relative}
+.day.sel{background:var(--ink); color:var(--bg); border-color:var(--ink)}
+.day.sel .n{color:var(--bg)}
+.tcount{display:flex; align-items:center; gap:4px; margin-top:auto}
+.tcount b{min-width:20px; height:20px; padding:0 6px; border-radius:10px; background:var(--violet-soft); color:var(--violet-ink); font-size:11px; display:inline-flex; align-items:center; justify-content:center}
+.tcount b.late{background:var(--red-soft); color:var(--red)}
+.tcount .ok{font-style:normal; color:var(--green); font-weight:800; font-size:12px}
+.day.sel .tcount .ok{color:var(--accent)}
+.ev{width:7px; height:7px; border-radius:4px; background:var(--coral); display:inline-block}
 .legend{display:flex; flex-wrap:wrap; gap:12px; font-size:12px; color:var(--muted)}
 
 /* tabelas */
@@ -330,6 +339,7 @@ pre{white-space:pre-wrap; overflow-wrap:anywhere; background:var(--soft); paddin
   .big{font-size:32px}
   .week{gap:5px} .wd{padding:8px 4px; align-items:center; border-radius:14px} .wd .hide-m{display:none}
   .day{min-height:58px; padding:5px; border-radius:11px} .day .evs{display:none}
+  .day.tday{min-height:64px} .tcount b{min-width:18px; height:18px; padding:0 4px}
   .cal,.cal-head{gap:5px}
   .timeline{height:118px}
   .bottomnav{display:grid; grid-template-columns:repeat(7,minmax(0,1fr)); position:fixed; left:12px; right:12px; bottom:calc(14px + env(safe-area-inset-bottom)); height:64px; border-radius:32px; background:#16161A; z-index:40; align-items:center; padding:0 6px; box-shadow:0 10px 30px rgba(0,0,0,.25)}
@@ -371,7 +381,7 @@ pre{white-space:pre-wrap; overflow-wrap:anywhere; background:var(--soft); paddin
 /* ============================================================
    dia. — núcleo: dados, datas, sincronização, horário
    ============================================================ */
-const APP_VERSION = "2.3 · 29/10/2026";
+const APP_VERSION = "2.4 · 29/10/2026";
 const KEY = "dia-app-v1";
 const VENC_KEY = "vencimento-app-v1";
 const COLS = ["tarefas","eventos","gastos","fixos","refeicoes","agua","treinos","sessoes","inbox","turnos","saude","poupObj","poupMov","poupAuto"];
@@ -806,7 +816,7 @@ const IC = {
 };
 const ic = (n, s = 20, sw = 2) => `<svg width="${s}" height="${s}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="${sw}" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${IC[n]}</svg>`;
 const ROUTES = [["hoje","Hoje"],["tarefas","Tarefas"],["horario","Horário"],["treino","Treino"],["comida","Comida"],["gastos","Gastos"],["poupanca","Poupança"]];
-const UI = { tarefasFiltro:"abertas", horMes:null, gasMes:null, comDia:null, treinoSel:{}, exSel:null, ai:{} };
+const UI = { tarefasFiltro:"dia", horMes:null, gasMes:null, comDia:null, treinoSel:{}, exSel:null, ai:{} };
 const route = () => { const r = (location.hash || "#hoje").slice(1).split("?")[0]; return ROUTES.some(x => x[0] === r) || r === "definicoes" ? r : "hoje"; };
 
 function pendingTasks(){ const t = today(); return live("tarefas").filter(x => !x.feito && (!x.data || x.data <= t)); }
@@ -1062,7 +1072,12 @@ function taskRow(x, compact){
 
 /* ---------- TAREFAS ---------- */
 function vTarefas(){
-  const t = today(), all = live("tarefas"), f = UI.tarefasFiltro;
+  const t = today(), all = live("tarefas"), f = UI.tarefasFiltro === "abertas" || UI.tarefasFiltro === "feitas" ? UI.tarefasFiltro : "dia";
+  const late = all.filter(x => !x.feito && x.data && x.data < t).length;
+  const head = `<div class="page-head"><div><p>${all.filter(x => !x.feito).length} por fazer${late ? ` · ${late} atrasada${late > 1 ? "s" : ""}` : ""}</p><h1>Tarefas</h1></div>
+    <div class="seg" role="group" aria-label="Vista"><button type="button" data-a="tf" data-v="dia" aria-pressed="${f === "dia"}">Calendário</button><button type="button" data-a="tf" data-v="abertas" aria-pressed="${f === "abertas"}">Lista</button><button type="button" data-a="tf" data-v="feitas" aria-pressed="${f === "feitas"}">Concluídas</button></div></div>`;
+  const side = `<div class="side-col">${aiCard("tarefas", "Transforma cartas, emails e avisos em tarefas com prazo", "Cartas, emails, PDF, fotos")}</div>`;
+  if (f === "dia") return head + `<div class="row"><div class="main-col">${tarefasCalendario()}</div>${side}</div>`;
   let body;
   if (f === "feitas"){
     const done = all.filter(x => x.feito).sort((a, b) => (b.feitoEm || b.upd) - (a.feitoEm || a.upd)).slice(0, 60);
@@ -1078,10 +1093,7 @@ function vTarefas(){
     ];
     body = groups.filter(g => g[1].length).map(g => `<h3 class="group-title ${g[2] || ""}">${esc(g[0])}</h3><div class="list">${g[1].map(x => taskRow(x)).join("")}</div>`).join("") || '<div class="empty">Sem tarefas por fazer. Escreve uma acima.</div>';
   }
-  const late = all.filter(x => !x.feito && x.data && x.data < t).length;
-  return `
-  <div class="page-head"><div><p>${all.filter(x => !x.feito).length} por fazer${late ? ` · ${late} atrasada${late > 1 ? "s" : ""}` : ""}</p><h1>Tarefas</h1></div>
-    <div class="seg" role="group" aria-label="Filtro"><button type="button" data-a="tf" data-v="abertas" aria-pressed="${f !== "feitas"}">Por fazer</button><button type="button" data-a="tf" data-v="feitas" aria-pressed="${f === "feitas"}">Concluídas</button></div></div>
+  return head + `
   <div class="row">
     <div class="main-col">
       <form class="quickadd" data-form="quick-task" autocomplete="off">
@@ -1092,8 +1104,56 @@ function vTarefas(){
       <section class="card" style="gap:0">${body}</section>
       <p class="xs muted" style="margin:0">Dica: escreve «hoje», «amanhã», um dia da semana, uma data (12/11), uma hora (10h ou 10:30), #etiqueta e «!» para prioridade alta.</p>
     </div>
-    <div class="side-col">${aiCard("tarefas", "Transforma cartas, emails e avisos em tarefas com prazo", "Cartas, emails, PDF, fotos")}</div>
+    ${side}
   </div>`;
+}
+/* calendário das tarefas: escolhe o dia e vê o que tens */
+function tarefasCalendario(){
+  const t = today();
+  if (!UI.tDia) UI.tDia = t;
+  const sel = UI.tDia, mes = UI.tMes || ym(sel);
+  const [Y, Mo] = mes.split("-").map(Number), nd = new Date(Y, Mo, 0).getDate(), off = (new Date(Y, Mo - 1, 1).getDay() + 6) % 7;
+  const tar = live("tarefas"), evs = live("eventos");
+  let cells = "";
+  for (let i = 0; i < off; i++) cells += '<div class="day out" aria-hidden="true"></div>';
+  for (let d = 1; d <= nd; d++){
+    const k = `${mes}-${pad(d)}`, s = shiftOf(k), abertas = tar.filter(x => x.data === k && !x.feito), feitas = tar.filter(x => x.data === k && x.feito).length, ne = evs.filter(e => e.data === k).length;
+    const atras = k < t && abertas.length;
+    cells += `<button type="button" class="day tday ${k === t ? "today" : ""} ${k === sel ? "sel" : ""} ${isHoliday(k) ? "hol" : ""}" data-a="tdia" data-k="${k}" aria-pressed="${k === sel}" aria-label="${longDate(k)}: ${abertas.length} tarefas por fazer${ne ? `, ${ne} compromissos` : ""}">
+      <span class="n">${d}</span>
+      ${s ? `<span class="chip ${chipCls(s)}" style="padding:0 5px;font-size:10px">${chipTxt(s)}</span>` : ""}
+      <span class="tcount">${abertas.length ? `<b class="${atras ? "late" : ""}">${abertas.length}</b>` : feitas ? '<i class="ok">✓</i>' : ""}${ne ? '<i class="ev"></i>' : ""}</span>
+    </button>`;
+  }
+  const doDia = tar.filter(x => x.data === sel).sort((a, b) => (a.feito - b.feito) || (a.hora || "99").localeCompare(b.hora || "99") || prioN(a) - prioN(b));
+  const evDia = evs.filter(e => e.data === sel).sort((a, b) => (a.hora || "").localeCompare(b.hora || ""));
+  const atrasadas = sel === t ? tar.filter(x => !x.feito && x.data && x.data < t) : [];
+  const s = shiftOf(sel);
+  return `
+  <section class="card">
+    <div class="card-head">
+      <div style="display:flex;align-items:center;gap:6px"><button class="iconbtn" type="button" data-a="tmes" data-v="-1" aria-label="Mês anterior">${ic("left")}</button>
+      <b style="min-width:130px;text-align:center">${MESES[Mo - 1][0].toUpperCase() + MESES[Mo - 1].slice(1)} ${Y}</b>
+      <button class="iconbtn" type="button" data-a="tmes" data-v="1" aria-label="Mês seguinte">${ic("right")}</button></div>
+      ${sel !== t || mes !== ym(t) ? '<button class="btn sm ghost" type="button" data-a="tdia" data-k="' + t + '">Hoje</button>' : ""}
+    </div>
+    <div class="cal-head"><span>Seg</span><span>Ter</span><span>Qua</span><span>Qui</span><span>Sex</span><span>Sáb</span><span>Dom</span></div>
+    <div class="cal">${cells}</div>
+    <div class="legend"><span><b>3</b> tarefas por fazer</span><span><b style="color:var(--red)">3</b> atrasadas</span><span style="color:var(--green)">✓ tudo feito</span><span><i class="ev" style="position:static;display:inline-block"></i> compromisso</span></div>
+  </section>
+  <section class="card" style="gap:10px">
+    <div class="card-head"><div><h2>${sel === t ? "Hoje · " : sel === addDays(t, 1) ? "Amanhã · " : ""}${longDate(sel)}</h2><div class="xs muted">${shiftLabel(s)}${isWork(s) ? " · " + S.cfg.horas[s].join("–") : ""}${isHoliday(sel) ? " · feriado" : ""}</div></div>
+      <div style="display:flex;gap:6px"><button class="iconbtn" type="button" data-a="tdia-mv" data-v="-1" aria-label="Dia anterior">${ic("left")}</button><button class="iconbtn" type="button" data-a="tdia-mv" data-v="1" aria-label="Dia seguinte">${ic("right")}</button></div></div>
+    <form class="quickadd" data-form="quick-task" data-dia="${sel}" autocomplete="off" style="background:var(--bg)">
+      <label for="qt" class="sr">Nova tarefa para ${longDate(sel)}</label>
+      <input id="qt" name="q" placeholder="Nova tarefa para este dia… ex.: ligar ao banco 10h">
+      <button class="btn" type="submit">Adicionar</button>
+    </form>
+    ${evDia.length ? `<h3 class="group-title">Compromissos</h3><div class="list">${evDia.map(e => `<div class="item"><span class="small" style="width:48px;font-weight:800">${esc(e.hora || "")}</span><div class="grow"><div class="t">${esc(e.t)}${e.origem === "google" ? ' <span class="chip c-x">Google</span>' : ""}</div>${e.local ? `<div class="s">${esc(e.local)}</div>` : ""}</div></div>`).join("")}</div>` : ""}
+    ${atrasadas.length ? `<h3 class="group-title red">Atrasadas</h3><div class="list">${atrasadas.map(x => taskRow(x)).join("")}</div>` : ""}
+    <h3 class="group-title">Tarefas</h3>
+    <div class="list">${doDia.map(x => taskRow(x)).join("") || '<div class="empty">Sem tarefas neste dia. Escreve uma acima.</div>'}</div>
+  </section>`;
 }
 
 /* ---------- HORÁRIO ---------- */
@@ -1805,6 +1865,9 @@ function applyItem(it, origem = "ia"){
 const A = {
   "del": el => { const c = el.dataset.col; remove(c, el.dataset.id); save(); render(); toast("Apagado."); },
   "tf": el => { UI.tarefasFiltro = el.dataset.v; render(); },
+  "tdia": el => { UI.tDia = el.dataset.k; UI.tMes = ym(el.dataset.k); render(); },
+  "tdia-mv": el => { UI.tDia = addDays(UI.tDia || today(), +el.dataset.v); UI.tMes = ym(UI.tDia); render(); },
+  "tmes": el => { const d = pdk((UI.tMes || ym(UI.tDia || today())) + "-01"); d.setMonth(d.getMonth() + (+el.dataset.v)); UI.tMes = ym(dk(d)); render(); },
   "edit-tarefa": el => dlgTarefa(byId("tarefas", el.dataset.id)),
   "add-gasto": () => dlgGasto(), "edit-gasto": el => dlgGasto(byId("gastos", el.dataset.id)),
   "add-evento": () => dlgEvento(), "add-refeicao": () => dlgRefeicao(), "edit-refeicao": el => dlgRefeicao(byId("refeicoes", el.dataset.id)),
@@ -1926,6 +1989,7 @@ document.addEventListener("submit", e => {
   e.preventDefault();
   const q = f.q.value.trim(); if (!q) return;
   const p = parseQuick(q); if (!p.t) return;
+  if (!p.data && f.dataset.dia) p.data = f.dataset.dia;
   put("tarefas", Object.assign(p, {feito:false})); save(); render();
   setTimeout(() => { const i = $("#qt"); if (i) i.focus(); }, 0);
 });
