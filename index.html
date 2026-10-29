@@ -300,9 +300,9 @@ pre{white-space:pre-wrap; overflow-wrap:anywhere; background:var(--soft); paddin
   .day{min-height:58px; padding:5px; border-radius:11px} .day .evs{display:none}
   .cal,.cal-head{gap:5px}
   .timeline{height:118px}
-  .bottomnav{display:grid; grid-template-columns:repeat(6,minmax(0,1fr)); position:fixed; left:12px; right:12px; bottom:calc(14px + env(safe-area-inset-bottom)); height:64px; border-radius:32px; background:#16161A; z-index:40; align-items:center; padding:0 6px; box-shadow:0 10px 30px rgba(0,0,0,.25)}
+  .bottomnav{display:grid; grid-template-columns:repeat(7,minmax(0,1fr)); position:fixed; left:12px; right:12px; bottom:calc(14px + env(safe-area-inset-bottom)); height:64px; border-radius:32px; background:#16161A; z-index:40; align-items:center; padding:0 6px; box-shadow:0 10px 30px rgba(0,0,0,.25)}
   :root[data-theme="dark"] .bottomnav{background:#26262E}
-  .bottomnav a{justify-self:center; width:46px; height:46px; border-radius:23px; color:#BDBDC4; display:flex; align-items:center; justify-content:center}
+  .bottomnav a{justify-self:center; width:44px; height:44px; border-radius:22px; color:#BDBDC4; display:flex; align-items:center; justify-content:center}
   .bottomnav a[aria-current="page"]{background:var(--accent); color:#16161A}
   .fab{display:flex; position:fixed; right:18px; bottom:calc(92px + env(safe-area-inset-bottom)); width:58px; height:58px; border-radius:20px; border:0; background:var(--accent); color:#16161A; z-index:41; align-items:center; justify-content:center; box-shadow:0 10px 24px rgba(0,0,0,.25)}
   .catrow{grid-template-columns:minmax(90px,120px) minmax(0,1fr) auto}
@@ -338,10 +338,10 @@ pre{white-space:pre-wrap; overflow-wrap:anywhere; background:var(--soft); paddin
 /* ============================================================
    dia. — núcleo: dados, datas, sincronização, horário
    ============================================================ */
-const APP_VERSION = "1.6 · 29/10/2026";
+const APP_VERSION = "1.7 · 29/10/2026";
 const KEY = "dia-app-v1";
 const VENC_KEY = "vencimento-app-v1";
-const COLS = ["tarefas","eventos","gastos","fixos","refeicoes","agua","treinos","sessoes","inbox","turnos","saude"];
+const COLS = ["tarefas","eventos","gastos","fixos","refeicoes","agua","treinos","sessoes","inbox","turnos","saude","poupObj","poupMov","poupAuto"];
 const DOW = ["Domingo","Segunda","Terça","Quarta","Quinta","Sexta","Sábado"];
 const DOW3 = ["Dom","Seg","Ter","Qua","Qui","Sex","Sáb"];
 const MESES = ["janeiro","fevereiro","março","abril","maio","junho","julho","agosto","setembro","outubro","novembro","dezembro"];
@@ -432,7 +432,9 @@ function mergeState(a, b){
   const out = Object.assign({}, a);
   out.cfg = (b.cfg && (b.cfg.upd || 0) > (a.cfg.upd || 0)) ? Object.assign({}, a.cfg, b.cfg) : a.cfg;
   ["venc","agendaOut","gstatus"].forEach(k => { out[k] = (b[k] && (!a[k] || (b[k].upd || 0) > (a[k].upd || 0))) ? b[k] : (a[k] || null); });
-  COLS.forEach(c => {
+  const cols = new Set(COLS);
+  Object.keys(a).concat(Object.keys(b)).forEach(k => { if (k !== "local" && (Array.isArray(a[k]) || Array.isArray(b[k]))) cols.add(k); });
+  cols.forEach(c => {
     const map = new Map();
     (a[c] || []).forEach(x => map.set(x.id, x));
     (b[c] || []).forEach(x => { const o = map.get(x.id); if (!o || (x.upd || 0) > (o.upd || 0)) map.set(x.id, x); });
@@ -647,6 +649,30 @@ function applyFixos(){
   return changed;
 }
 
+/* ---------- poupança ---------- */
+const movsDe = id => live("poupMov").filter(m => m.obj === id);
+const saldoObj = id => r2(movsDe(id).reduce((a, m) => a + (+m.valor || 0), 0));
+const totalPoupado = () => r2(live("poupMov").filter(m => live("poupObj").some(o => o.id === m.obj)).reduce((a, m) => a + (+m.valor || 0), 0));
+const poupadoMes = m => r2(live("poupMov").filter(x => ym(x.data) === m).reduce((a, x) => a + (+x.valor || 0), 0));
+/* depósitos automáticos do mês corrente (id fixo evita duplicados entre aparelhos) */
+function applyPoupAuto(){
+  const t = today(), m = ym(t), day = +t.slice(8); let ch = false;
+  live("poupAuto").forEach(a => {
+    const id = `pa-${a.id}-${m}`;
+    const last = new Date(+m.slice(0, 4), +m.slice(5, 7), 0).getDate();
+    if (live("poupObj").some(o => o.id === a.obj) && (+a.dia || 1) <= day && `${m}-${pad(Math.min(+a.dia || 1, last))}` >= (a.desde || "") && !S.poupMov.some(x => x.id === id)){
+      put("poupMov", {id, obj:a.obj, data:`${m}-${pad(Math.min(+a.dia || 1, last))}`, valor:+a.valor || 0, nota:"Poupança automática", origem:"auto"});
+      ch = true;
+    }
+  });
+  return ch;
+}
+function objPorNome(nome){
+  const n = String(nome || "").toLowerCase().trim(), objs = live("poupObj");
+  if (!objs.length) return put("poupObj", {nome:"Poupança geral", alvo:0, data:""});
+  return (n && (objs.find(o => o.nome.toLowerCase() === n) || objs.find(o => o.nome.toLowerCase().includes(n) || n.includes(o.nome.toLowerCase())))) || objs[0];
+}
+
 /* ---------- comida e treino ---------- */
 const refeicoesDia = k => live("refeicoes").filter(r => r.data === k).sort((a, b) => (a.hora || "").localeCompare(b.hora || ""));
 function totaisDia(k){
@@ -678,6 +704,7 @@ const IC = {
   treino:'<path d="M6 7v10M18 7v10M3 10v4M21 10v4M6 12h12"/>',
   comida:'<path d="M7 3v8a2 2 0 0 0 2 2v8M11 3v8M3 3v8a2 2 0 0 0 2 2M17 3c-2 2-2 7 0 9v9"/>',
   gastos:'<rect x="2" y="6" width="20" height="13" rx="3"/><path d="M2 10h20M6 15h4"/>',
+  poupanca:'<ellipse cx="12" cy="6" rx="7" ry="3"/><path d="M5 6v6c0 1.7 3.1 3 7 3s7-1.3 7-3V6M5 12v6c0 1.7 3.1 3 7 3s7-1.3 7-3v-6"/>',
   sun:'<circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/>',
   moon:'<path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z"/>',
   auto:'<circle cx="12" cy="12" r="9"/><path d="M12 3v18" /><path d="M12 3a9 9 0 0 1 0 18z" fill="currentColor"/>',
@@ -693,7 +720,7 @@ const IC = {
   cal:'<rect x="3" y="4" width="18" height="17" rx="2"/><path d="M3 9h18M8 2v4M16 2v4M8 14h3"/>'
 };
 const ic = (n, s = 20, sw = 2) => `<svg width="${s}" height="${s}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="${sw}" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${IC[n]}</svg>`;
-const ROUTES = [["hoje","Hoje"],["tarefas","Tarefas"],["horario","Horário"],["treino","Treino"],["comida","Comida"],["gastos","Gastos"]];
+const ROUTES = [["hoje","Hoje"],["tarefas","Tarefas"],["horario","Horário"],["treino","Treino"],["comida","Comida"],["gastos","Gastos"],["poupanca","Poupança"]];
 const UI = { tarefasFiltro:"abertas", horMes:null, gasMes:null, comDia:null, treinoSel:{}, exSel:null, ai:{} };
 const route = () => { const r = (location.hash || "#hoje").slice(1).split("?")[0]; return ROUTES.some(x => x[0] === r) || r === "definicoes" ? r : "hoje"; };
 
@@ -721,7 +748,7 @@ function render(){
   pendingRender = false;
   applyTheme(); renderNav(); refreshSyncUI();
   const r = route();
-  const v = {hoje:vHoje, tarefas:vTarefas, horario:vHorario, treino:vTreino, comida:vComida, gastos:vGastos, definicoes:vDef}[r];
+  const v = {hoje:vHoje, tarefas:vTarefas, horario:vHorario, treino:vTreino, comida:vComida, gastos:vGastos, poupanca:vPoup, definicoes:vDef}[r];
   $("#view").innerHTML = v();
   document.title = r === "hoje" ? "dia." : `${(ROUTES.find(x => x[0] === r) || [0, "Definições"])[1]} · dia.`;
 }
@@ -921,6 +948,10 @@ function vHoje(){
       <div style="display:flex;gap:8px;align-items:center"><button class="btn sm ghost" type="button" data-a="agua" data-v="0.25" data-k="${t}">${ic("drop", 16)} +250 ml</button><span class="xs muted">${num(tot.agua, 2)} de ${num(M.agua)} L</span></div>
     </div>
   </section>
+  ${live("poupObj").length ? `<a class="card" href="#poupanca" style="text-decoration:none;flex-direction:row;flex-wrap:wrap;align-items:center;gap:18px">
+    <div><div class="small muted" style="font-weight:700">Poupança</div><div class="mid">${eur0(totalPoupado())}</div></div>
+    ${live("poupObj").filter(o => +o.alvo > 0).slice(0, 3).map(o => { const v = saldoObj(o.id), p = Math.min(100, v / o.alvo * 100); return `<div style="flex:1 1 180px;min-width:0"><div class="small" style="display:flex;justify-content:space-between;gap:8px"><b>${esc(o.nome)}</b><span class="muted">${Math.round(p)} %</span></div><div class="bar" style="margin-top:6px"><i style="width:${p.toFixed(0)}%;background:var(--green)"></i></div></div>`; }).join("")}
+  </a>` : ""}
   ${sau ? `<section class="inbox-row"><b class="small">Saúde</b>${sau.sono ? `<span class="pill" style="padding-right:14px">Sono ${num(sau.sono)} h</span>` : ""}${sau.passos ? `<span class="pill" style="padding-right:14px">${Math.round(sau.passos).toLocaleString("pt-PT")} passos</span>` : ""}${sau.peso ? `<span class="pill" style="padding-right:14px">${num(sau.peso)} kg</span>` : ""}<span class="xs muted">Apple Saúde · ${relDate(sau.id).toLowerCase()}</span></section>` : ""}
   ${aiCard("auto", "Larga aqui qualquer documento: a IA percebe se é fatura, escala, plano ou refeição", "Faturas, talões, escalas, planos, fotos de refeições")}
   `;
@@ -1283,6 +1314,61 @@ function vDef(){
   </div>`;
 }
 
+/* ---------- POUPANÇA ---------- */
+function vPoup(){
+  const t = today(), m = ym(t), objs = live("poupObj"), autos = live("poupAuto");
+  const tot = totalPoupado(), mes = poupadoMes(m), sobra = r2(orcTotal() - somaGastos(gastosMes(m)));
+  const autoMes = autos.reduce((a, x) => a + (+x.valor || 0), 0);
+  const meses = Array.from({length:12}, (_, i) => { const d = pdk(`${m}-01`); d.setMonth(d.getMonth() - 11 + i); return ym(dk(d)); });
+  const vals = meses.map(x => poupadoMes(x)), mx = Math.max(1, ...vals.map(Math.abs));
+  const recentes = live("poupMov").filter(x => objs.some(o => o.id === x.obj)).sort((a, b) => b.data.localeCompare(a.data) || b.upd - a.upd).slice(0, 12);
+  const card = o => {
+    const v = saldoObj(o.id), alvo = +o.alvo || 0, p = alvo ? Math.min(100, v / alvo * 100) : 0, falta = r2(alvo - v);
+    let plano = "";
+    if (alvo && falta <= 0) plano = `<span class="chip c-ok">Objetivo atingido</span>`;
+    else if (alvo && o.data){ const n = Math.max(1, (pdk(o.data).getFullYear() - pdk(t).getFullYear()) * 12 + pdk(o.data).getMonth() - pdk(t).getMonth()); plano = `<span class="small muted">Faltam ${eur(falta)} · cerca de <b style="color:var(--ink)">${eur(falta / n)}</b> por mês até ${MESES[pdk(o.data).getMonth()]} ${pdk(o.data).getFullYear()}</span>`; }
+    else if (alvo) plano = `<span class="small muted">Faltam ${eur(falta)}</span>`;
+    return `<section class="card">
+      <div class="card-head"><h2>${esc(o.nome)}</h2><button class="linkbtn" type="button" data-a="edit-obj" data-id="${o.id}">Editar</button></div>
+      <div style="display:flex;align-items:baseline;gap:8px;flex-wrap:wrap"><span class="big">${eur(v)}</span>${alvo ? `<span class="small muted">de ${eur0(alvo)}</span>` : ""}</div>
+      ${alvo ? `<div class="bar"><i style="width:${p.toFixed(0)}%;background:var(--green)"></i></div>` : ""}
+      ${plano}
+      <div style="display:flex;gap:8px;flex-wrap:wrap"><button class="btn sm" type="button" data-a="poup-mov" data-id="${o.id}" data-v="1">+ Depositar</button><button class="btn sm ghost" type="button" data-a="poup-mov" data-id="${o.id}" data-v="-1">Retirar</button></div>
+    </section>`;
+  };
+  return `
+  <div class="page-head"><div><p>${objs.length} objetivo${objs.length === 1 ? "" : "s"} · ${mes >= 0 ? "poupaste" : "retiraste"} ${eur(Math.abs(mes))} este mês</p><h1>Poupança</h1></div>
+    <div style="display:flex;gap:8px;flex-wrap:wrap"><button class="btn ghost" type="button" data-a="edit-obj">+ Objetivo</button><button class="btn" type="button" data-a="poup-mov" data-v="1">+ Depositar</button></div></div>
+  <div class="kpis">
+    <div class="kpi inv"><div class="l">Total poupado</div><div class="v">${eur(tot)}</div><div class="xs">em ${objs.length} objetivo${objs.length === 1 ? "" : "s"}</div></div>
+    <div class="kpi"><div class="l">Este mês</div><div class="v" style="color:${mes < 0 ? "var(--red)" : "var(--green)"}">${mes >= 0 ? "+" : "−"}${eur(Math.abs(mes))}</div><div class="xs muted">${autoMes ? `inclui ${eur(autoMes)} automáticos` : "depósitos menos levantamentos"}</div></div>
+    <div class="kpi"><div class="l">Sobra do orçamento</div><div class="v">${orcTotal() ? eur(sobra) : "—"}</div><div class="xs muted">${orcTotal() ? (sobra > 0 ? "o que não gastaste este mês" : "orçamento já usado") : "define um orçamento em Gastos"}</div></div>
+    <div class="kpi"><div class="l">Poupança automática</div><div class="v">${eur(autoMes)}</div><div class="xs muted">por mês</div></div>
+  </div>
+  ${sobra > 0 && objs.length && orcTotal() && new Date(+t.slice(0, 4), +t.slice(5, 7), 0).getDate() - +t.slice(8) < 5 ? `<section class="card acc" style="flex-direction:row;flex-wrap:wrap;align-items:center;justify-content:space-between"><div><h2>Sobram ${eur(sobra)} do orçamento deste mês</h2><span class="small">Podes guardar já uma parte num objetivo.</span></div><button class="btn" type="button" data-a="poup-sobra" data-v="${sobra}" style="background:#16161A;color:#fff">Guardar sobra</button></section>` : ""}
+  <div class="row">
+    <div class="main-col">
+      ${objs.length ? `<div class="grid g2">${objs.map(card).join("")}</div>` : `<section class="card"><h2>Ainda não tens objetivos</h2><span class="small muted">Cria o primeiro: férias, fundo de emergência, carro… Indica quanto queres juntar e até quando, e a app diz-te quanto pôr de lado por mês.</span><div><button class="btn" type="button" data-a="edit-obj">+ Criar objetivo</button></div></section>`}
+      <section class="card">
+        <h2>Últimos 12 meses</h2>
+        <div class="chart" role="img" aria-label="Poupança por mês">${meses.map((x, i) => `<div class="col"><i class="${i === 11 ? "on" : ""}" style="height:${Math.max(2, Math.abs(vals[i]) / mx * 85)}%;${vals[i] < 0 ? "background:var(--red-soft)" : ""}" title="${eur(vals[i])}"></i><span>${MESES[+x.slice(5) - 1].slice(0, 3)}</span></div>`).join("")}</div>
+        <div class="xs muted">Média dos meses com movimentos: ${(() => { const v = vals.filter(x => x); return v.length ? eur(v.reduce((a, b) => a + b, 0) / v.length) : "—"; })()}</div>
+      </section>
+    </div>
+    <div class="side-col">
+      <section class="card">
+        <div class="card-head"><h2>Poupança automática</h2><button class="btn sm" type="button" data-a="edit-auto" ${objs.length ? "" : "disabled"}>+ Nova</button></div>
+        <span class="xs muted">Um valor que passa sozinho para um objetivo, no mesmo dia de cada mês.</span>
+        <div class="list">${autos.map(a => { const o = objs.find(x => x.id === a.obj); return `<div class="item"><div class="grow"><div class="t">${esc(o ? o.nome : "Objetivo apagado")}</div><div class="s">Dia ${esc(a.dia)} de cada mês</div></div><span class="amount">${eur(a.valor)}</span><button class="linkbtn" type="button" data-a="edit-auto" data-id="${a.id}">Editar</button><button class="x" type="button" data-a="del" data-col="poupAuto" data-id="${a.id}" aria-label="Apagar poupança automática">${ic("x", 16)}</button></div>`; }).join("") || '<div class="empty">Por exemplo: 100 € para as férias no dia 25.</div>'}</div>
+      </section>
+      <section class="card" style="gap:0">
+        <h2 style="margin-bottom:6px">Movimentos</h2>
+        <div class="list">${recentes.map(x => { const o = objs.find(y => y.id === x.obj); return `<div class="item"><div class="grow"><div class="t">${esc(o.nome)}</div><div class="s">${relDate(x.data)}${x.nota ? " · " + esc(x.nota) : ""}${x.origem === "voz" ? " · por voz" : ""}</div></div><span class="amount" style="color:${x.valor < 0 ? "var(--red)" : "var(--green)"}">${x.valor < 0 ? "−" : "+"}${eur(Math.abs(x.valor))}</span><button class="x" type="button" data-a="del" data-col="poupMov" data-id="${x.id}" aria-label="Apagar movimento">${ic("x", 16)}</button></div>`; }).join("") || '<div class="empty">Sem movimentos.</div>'}</div>
+      </section>
+    </div>
+  </div>`;
+}
+
 /* ============================================================
    dia. — ações, diálogos, IA e arranque
    ============================================================ */
@@ -1393,6 +1479,33 @@ function dlgSheet(){
     <span class="xs muted">As fotos e ficheiros vão para o Assistente IA, que os lê e propõe o registo.</span>`, null);
 }
 
+/* ---------- poupança ---------- */
+function dlgObj(o = {}){
+  openDlg(o.id ? "Editar objetivo" : "Novo objetivo de poupança", `<label class="field">Nome<input name="nome" required value="${esc(o.nome || "")}" placeholder="Ex.: Férias, Fundo de emergência, Carro"></label>
+    <div class="fields"><label class="field">Quanto queres juntar (€)<input name="alvo" inputmode="decimal" value="${o.alvo ? esc(num(o.alvo, 2)) : ""}" placeholder="Opcional"></label><label class="field">Até quando<input type="date" name="data" value="${esc(o.data || "")}"></label></div>
+    ${o.id ? "" : `<label class="field">Já tens algum valor guardado? (€)<input name="ini" inputmode="decimal" placeholder="0"></label>`}`,
+  v => {
+    const n = put("poupObj", {id:o.id, nome:v.nome.trim(), alvo:pnum(v.alvo), data:v.data});
+    if (!o.id && pnum(v.ini)) put("poupMov", {obj:n.id, data:today(), valor:pnum(v.ini), nota:"Valor inicial"});
+    save(); render();
+  }, "Guardar", o.id ? `<button class="btn danger" type="button" data-a="del-obj" data-id="${o.id}" style="margin-right:auto">Apagar</button>` : "");
+}
+function dlgMov(objId, sinal = 1, valor){
+  const objs = live("poupObj");
+  if (!objs.length) return dlgObj();
+  openDlg(sinal > 0 ? "Depositar na poupança" : "Retirar da poupança", `<label class="field">Objetivo<select name="obj">${opt(objs.map(o => [o.id, o.nome]), objId || objs[0].id)}</select></label>
+    <div class="fields"><label class="field">Valor (€)<input name="valor" inputmode="decimal" required value="${valor ? esc(num(valor, 2)) : ""}"></label><label class="field">Data<input type="date" name="data" value="${today()}"></label></div>
+    <label class="field">Nota<input name="nota" placeholder="Opcional"></label>`,
+  v => { const x = Math.abs(pnum(v.valor)); if (!x) throw new Error("Indica o valor."); put("poupMov", {obj:v.obj, data:v.data || today(), valor:sinal * x, nota:v.nota.trim(), origem:"manual"}); save(); render(); toast(sinal > 0 ? "Depósito registado." : "Levantamento registado."); }, sinal > 0 ? "Depositar" : "Retirar");
+}
+function dlgAuto(a = {}){
+  const objs = live("poupObj");
+  openDlg(a.id ? "Editar poupança automática" : "Nova poupança automática", `<label class="field">Objetivo<select name="obj">${opt(objs.map(o => [o.id, o.nome]), a.obj || (objs[0] || {}).id)}</select></label>
+    <div class="fields"><label class="field">Valor por mês (€)<input name="valor" inputmode="decimal" required value="${a.valor ? esc(num(a.valor, 2)) : ""}"></label><label class="field">Dia do mês<input name="dia" inputmode="numeric" required value="${esc(a.dia || 25)}"></label></div>
+    <span class="xs muted">Dica: põe o dia a seguir ao dia em que recebes o vencimento.</span>`,
+  v => { put("poupAuto", {id:a.id, obj:v.obj, valor:Math.abs(pnum(v.valor)), dia:Math.min(31, Math.max(1, Math.round(pnum(v.dia)) || 1)), desde:a.desde || today()}); applyPoupAuto(); save(); render(); });
+}
+
 /* ---------- IA ---------- */
 const secOf = r => ({tarefas:"tarefas", horario:"horario", treino:"treino", comida:"comida", gastos:"gastos"})[r] || "auto";
 const b64 = buf => { let s = "", b = new Uint8Array(buf); for (let i = 0; i < b.length; i += 0x8000) s += String.fromCharCode.apply(null, b.subarray(i, i + 0x8000)); return btoa(s); };
@@ -1452,6 +1565,7 @@ function applyItem(it, origem = "ia"){
     case "refeicao": { const h = it.hora || nowHM(); r = ["refeicoes", put("refeicoes", {data:it.data || UI.comDia || t, hora:h, tipo:REF_TIPOS.includes(it.tipo_ref) ? it.tipo_ref : guessRefTipo(h), desc:it.desc || "", kcal:pnum(it.kcal), p:pnum(it.p), h:pnum(it.h), g:pnum(it.g), origem:"ia"})]; break; }
     case "turno": if (it.data && ["M","T","N","F","-"].includes(it.s)) r = ["turnos", put("turnos", {id:it.data, s:it.s})]; break;
     case "treino": r = ["treinos", put("treinos", {nome:it.nome || "Treino", hora:it.hora || S.cfg.treinoHora, dias:(it.dias || []).map(Number).filter(d => d >= 0 && d <= 6), ex:(it.ex || []).map(e => ({n:e.n || e.nome, s:pnum(e.s) || 3, r:String(e.r || "10")}))})]; break;
+    case "poupanca": { const o = objPorNome(it.objetivo); const v = pnum(it.valor); if (v) r = ["poupMov", put("poupMov", {obj:o.id, data:it.data || t, valor:v, nota:it.nota || "", origem:origem === "ia" ? "voz" : origem})]; break; }
     case "saude": { const id = it.data || addDays(t, -1); const o = byId("saude", id) || {}; r = ["saude", put("saude", {id, passos:pnum(it.passos) || o.passos, sono:pnum(it.sono) || o.sono, peso:pnum(it.peso) || o.peso})]; break; }
   }
   return r ? [r[0], r[1].id] : null;
@@ -1466,7 +1580,12 @@ const A = {
   "add-evento": () => dlgEvento(), "add-refeicao": () => dlgRefeicao(), "edit-refeicao": el => dlgRefeicao(byId("refeicoes", el.dataset.id)),
   "edit-treino": el => dlgTreino(el.dataset.id ? byId("treinos", el.dataset.id) : {}),
   "edit-fixo": el => dlgFixo(el.dataset.id ? byId("fixos", el.dataset.id) : {}),
-  "orc": () => dlgOrc(), "metas": () => { location.hash = "#definicoes"; },
+  "orc": () => dlgOrc(),
+  "edit-obj": el => dlgObj(el.dataset.id ? byId("poupObj", el.dataset.id) : {}),
+  "del-obj": el => { $("#dlg").close("cancel"); const id = el.dataset.id; remove("poupObj", id); live("poupAuto").filter(a => a.obj === id).forEach(a => remove("poupAuto", a.id)); save(); render(); toast("Objetivo apagado."); },
+  "poup-mov": el => dlgMov(el.dataset.id, +el.dataset.v || 1),
+  "poup-sobra": el => dlgMov(null, 1, +el.dataset.v),
+  "edit-auto": el => dlgAuto(el.dataset.id ? byId("poupAuto", el.dataset.id) : {}), "metas": () => { location.hash = "#definicoes"; },
   "day": el => dlgDay(el.dataset.k),
   "hm": el => { const d = pdk(UI.horMes + "-01"); d.setMonth(d.getMonth() + (+el.dataset.v)); UI.horMes = ym(dk(d)); render(); },
   "gm": el => { const d = pdk(UI.gasMes + "-01"); d.setMonth(d.getMonth() + (+el.dataset.v)); UI.gasMes = ym(dk(d)); render(); },
@@ -1581,11 +1700,12 @@ window.addEventListener("drop", e => {
 function boot(){
   let ch = readVencLocal();
   ch = applyFixos() || ch;
+  ch = applyPoupAuto() || ch;
   if (ch) save();
   render();
   window.addEventListener("hashchange", () => { render(); window.scrollTo(0, 0); });
   matchMedia("(prefers-color-scheme: dark)").addEventListener("change", applyTheme);
-  document.addEventListener("visibilitychange", () => { if (document.visibilityState === "visible"){ if (readVencLocal() | applyFixos()) save(); syncNow(); softRender(); } });
+  document.addEventListener("visibilitychange", () => { if (document.visibilityState === "visible"){ if (readVencLocal() | applyFixos() | applyPoupAuto()) save(); syncNow(); softRender(); } });
   setInterval(() => { if (document.visibilityState === "visible") syncNow(); }, 20000);
   setInterval(() => { if (document.visibilityState === "visible" && route() === "hoje") softRender(); }, 60000);
   syncNow();
@@ -1682,7 +1802,8 @@ function ctxComando(){
     tarefasPorFazer:live("tarefas").filter(x => !x.feito).slice(0, 60).map(x => ({id:x.id, t:x.t, data:x.data || "", hora:x.hora || ""})),
     compromissos:live("eventos").filter(e => e.data >= t && e.data <= addDays(t, 14)).map(e => ({t:e.t, data:e.data, hora:e.hora || ""})),
     comidaHoje:totaisDia(t), metasComida:S.cfg.metas,
-    treinoHoje:treinosDoDia(t).map(x => x.nome), planoTreino:live("treinos").map(p => ({nome:p.nome, dias:(p.dias || []).map(d => DOW3[d])}))
+    treinoHoje:treinosDoDia(t).map(x => x.nome),
+    poupanca:{total:totalPoupado(), esteMes:poupadoMes(ym(t)), objetivos:live("poupObj").map(o => ({nome:o.nome, guardado:saldoObj(o.id), alvo:+o.alvo || 0, ate:o.data || ""}))}, planoTreino:live("treinos").map(p => ({nome:p.nome, dias:(p.dias || []).map(d => DOW3[d])}))
   };
 }
 async function executarComando(texto){
@@ -1703,7 +1824,7 @@ async function executarComando(texto){
   save(); render();
 }
 /* aceita pequenas variações no formato das ações e corrige datas */
-const TIPO_ALIAS = {despesa:"gasto", expense:"gasto", compra:"gasto", pagamento:"gasto", task:"tarefa", lembrete:"tarefa", "refeição":"refeicao", comida:"refeicao", compromisso:"evento", event:"evento", "água":"agua", water:"agua"};
+const TIPO_ALIAS = {poupança:"poupanca", poupar:"poupanca", savings:"poupanca", deposito:"poupanca", "depósito":"poupanca", despesa:"gasto", expense:"gasto", compra:"gasto", pagamento:"gasto", task:"tarefa", lembrete:"tarefa", "refeição":"refeicao", comida:"refeicao", compromisso:"evento", event:"evento", "água":"agua", water:"agua"};
 function normData(v){
   const t = today(), s = String(v || "").trim().toLowerCase();
   if (!s || s === "hoje" || s === "today") return t;
@@ -1725,6 +1846,7 @@ function normAcao(a){
   if (tipo === "gasto"){ a.valor = Math.abs(pnum(a.valor ?? a.montante ?? a.total ?? a.preco)); a.desc = a.desc || a.descricao || a.comerciante || a.loja || "Gasto"; a.cat = a.cat || a.categoria; if (!a.valor) return null; }
   if (tipo === "tarefa") a.t = a.t || a.titulo || a.texto || a.desc;
   if (tipo === "evento") a.t = a.t || a.titulo || a.desc;
+  if (tipo === "poupanca"){ a.valor = pnum(a.valor ?? a.montante); a.objetivo = a.objetivo || a.nome || a.meta || ""; a.data = normData(a.data); if (!a.valor) return null; }
   if (tipo === "agua") a.l = pnum(a.l ?? a.litros) || (pnum(a.ml) / 1000) || .25;
   return a;
 }
@@ -1767,6 +1889,10 @@ function comandoLocal(txt){
   if ((m = /\b(?:gastei|paguei|gasto de|despesa de)\s+([\d.,]+)\s*(?:€|euros?)?(?:\s*e\s*(\d+)\s*c[eê]ntimos?)?\s*(?:em|no|na|nos|nas|de|do|da|com|para|ao|à)?\s*(.*)$/i.exec(t))){
     const valor = r2(pnum(m[1]) + (m[2] ? +m[2] / 100 : 0)), desc = cap((m[3] || "Gasto").trim()), cat = guessCat(desc);
     return {resposta:`Registei ${eur(valor)} em ${cat}.`, acoes:[{tipo:"gasto", valor, desc, cat, data:today()}]};
+  }
+  if ((m = /\b(poupei|guardei|pus|meti|depositei|retirei|tirei|levantei)\s+([\d.,]+)\s*(?:€|euros?)?\s*(?:na|no|para a|para o|para|da|do)?\s*(?:poupança|mealheiro|objetivo)?\s*(?:d[aoe]s?|para)?\s*(.*)$/i.exec(t)) && (/poupan|mealheiro|objetivo|poupei|guardei|depositei/i.test(t))){
+    const sinal = /retirei|tirei|levantei/i.test(m[1]) ? -1 : 1, v = pnum(m[2]), o = objPorNome(m[3]);
+    return {resposta:`${sinal > 0 ? "Guardei" : "Retirei"} ${eur(v)} ${sinal > 0 ? "em" : "de"} ${o.nome}.`, acoes:[{tipo:"poupanca", valor:sinal * v, objetivo:o.nome}]};
   }
   if ((m = /\bbebi\s+(\w+(?:[.,]\d+)?)?\s*(copos?|garrafas?|garrafinhas?|litros?|l|ml|mililitros?)?\s*(?:de\s+)?[áa]gua/i.exec(t))){
     const n = nW(m[1]), u = (m[2] || "copo").toLowerCase();
