@@ -412,10 +412,10 @@ pre{white-space:pre-wrap; overflow-wrap:anywhere; background:var(--soft); paddin
 /* ============================================================
    dia. — núcleo: dados, datas, sincronização, horário
    ============================================================ */
-const APP_VERSION = "3.2 · 29/10/2026";
+const APP_VERSION = "3.3 · 29/10/2026";
 const KEY = "dia-app-v1";
 const VENC_KEY = "vencimento-app-v1";
-const COLS = ["tarefas","eventos","gastos","fixos","refeicoes","agua","treinos","sessoes","inbox","turnos","saude","poupObj","poupMov","poupAuto","recorr","extras","creditos","credMov"];
+const COLS = ["tarefas","eventos","gastos","fixos","refeicoes","agua","treinos","sessoes","inbox","turnos","saude","poupObj","poupMov","poupAuto","recorr","extras","creditos","credMov","prazos","assinaturas"];
 const DOW = ["Domingo","Segunda","Terça","Quarta","Quinta","Sexta","Sábado"];
 const DOW3 = ["Dom","Seg","Ter","Qua","Qui","Sex","Sáb"];
 const MESES = ["janeiro","fevereiro","março","abril","maio","junho","julho","agosto","setembro","outubro","novembro","dezembro"];
@@ -821,7 +821,7 @@ const PLANO_EXEMPLO = [
    dia. — avisos, tarefas que se repetem, trocas e horas extra,
    resumo semanal, notificações, cópias e exportação para Excel
    ============================================================ */
-const AVISOS_DEF = {tarefas:15, turno:60, fixosDias:3, orc:true, resumo:true, resumoHora:"20:00"};
+const AVISOS_DEF = {tarefas:15, turno:60, fixosDias:3, orc:true, resumo:true, resumoHora:"20:00", manha:true, manhaHora:"08:00"};
 const avisos = () => Object.assign({}, AVISOS_DEF, S.cfg.avisos || {});
 const diasNoMes = m => new Date(+m.slice(0, 4), +m.slice(5, 7), 0).getDate();
 
@@ -858,7 +858,8 @@ function avisosHtml(){
   const out = [];
   alertasOrc().forEach(a => out.push(`<a class="aviso ${a.pct >= 1 ? "red" : ""}" href="#gastos">${ic("alert", 16)}<span><b>${esc(a.cat)}</b> ${a.pct >= 1 ? `passou o orçamento em ${eur(a.gasto - a.orc)}` : `já vai em ${Math.round(a.pct * 100)} % do orçamento (faltam ${eur(a.orc - a.gasto)})`}</span></a>`));
   fixosProximos().forEach(x => out.push(`<a class="aviso" href="#gastos">${ic("bell", 16)}<span><b>${esc(x.f.desc)}</b> ${eur(x.f.valor)} · ${x.em === 0 ? "hoje" : x.em === 1 ? "amanhã" : `daqui a ${x.em} dias`}</span></a>`));
-  return out.length ? `<section class="avisos" aria-label="Avisos">${out.join("")}</section>` : "";
+  const mais = avisosMaisHtml();
+  return out.length || mais ? `<section class="avisos" aria-label="Avisos">${out.join("")}${mais}</section>` : "";
 }
 
 /* ---------- tarefas que se repetem ---------- */
@@ -1491,7 +1492,7 @@ function vTarefas(){
   const late = all.filter(x => !x.feito && x.data && x.data < t).length;
   const head = `<div class="page-head"><div><p>${all.filter(x => !x.feito).length} por fazer${late ? ` · ${late} atrasada${late > 1 ? "s" : ""}` : ""}</p><h1>Tarefas</h1></div>
     <div class="seg" role="group" aria-label="Vista"><button type="button" data-a="tf" data-v="dia" aria-pressed="${f === "dia"}">Calendário</button><button type="button" data-a="tf" data-v="abertas" aria-pressed="${f === "abertas"}">Lista</button><button type="button" data-a="tf" data-v="feitas" aria-pressed="${f === "feitas"}">Concluídas</button></div></div>`;
-  const side = `<div class="side-col">${aiCard("tarefas", "Transforma cartas, emails e avisos em tarefas com prazo", "Cartas, emails, PDF, fotos")}</div>`;
+  const side = `<div class="side-col">${prazosCard()}${aiCard("tarefas", "Transforma cartas, emails e avisos em tarefas com prazo", "Cartas, emails, PDF, fotos")}</div>`;
   if (f === "dia") return head + `<div class="row"><div class="main-col">${tarefasCalendario()}</div>${side}</div>`;
   let body;
   if (f === "feitas"){
@@ -1830,6 +1831,7 @@ function vGastos(){
     <div class="side-col">
       ${aiCard("gastos", "Arrasta o extrato do banco: cada movimento entra na categoria certa e os repetidos ficam de fora", "Extrato PDF, CSV ou Excel, faturas, talões")}
       ${poupCard()}
+      ${subsCard()}
       <section class="card">
         <div class="card-head"><h2>Despesas fixas</h2><button class="btn sm" type="button" data-a="edit-fixo">+ Fixa</button></div>
         <span class="xs muted">Entram sozinhas em Gastos no dia de cada mês. Recebes um aviso ${avisos().fixosDias} dia${avisos().fixosDias == 1 ? "" : "s"} antes (muda em Definições › Notificações).</span>
@@ -1948,6 +1950,8 @@ function notifCard(){
     ${!syncOn() ? '<span class="xs" style="font-weight:700">Liga primeiro a sincronização.</span>' : UI.ping && !UI.ping.erro && !UI.ping.push ? '<span class="small" style="color:var(--red);font-weight:700">O servidor ainda tem o código antigo: atualiza o worker.js no Cloudflare e junta o Cron Trigger «*/5 * * * *» (vê o LEIA-ME, secção 8).</span>' : ""}
     <div class="fields">${n("tarefas", "Tarefas com hora", "min antes")}${n("turno", "Início do turno", "min antes")}${n("fixosDias", "Pagamentos fixos", "dias antes")}</div>
     <label class="item" style="border:0;min-height:40px"><input class="check" type="checkbox" data-c="aviso-bool" data-k="orc" ${a.orc ? "checked" : ""}> <span class="small" style="font-weight:700">Avisar quando uma categoria chega aos 90 % do orçamento</span></label>
+    <label class="item" style="border:0;min-height:40px"><input class="check" type="checkbox" data-c="aviso-bool" data-k="manha" ${a.manha ? "checked" : ""}> <span class="small" style="font-weight:700">Resumo da manhã às</span> <input type="time" data-c="aviso-hora" data-k="manhaHora" value="${esc(a.manhaHora)}" style="width:130px" class="input"></label>
+    <span class="xs muted" style="margin-top:-6px">Com turno da manhã chega 1 h antes de entrar; em dias de noite chega às 16:00.</span>
     <label class="item" style="border:0;min-height:40px"><input class="check" type="checkbox" data-c="aviso-bool" data-k="resumo" ${a.resumo ? "checked" : ""}> <span class="small" style="font-weight:700">Resumo semanal ao domingo às</span> <input type="time" data-c="aviso-hora" value="${esc(a.resumoHora)}" style="width:130px" class="input"></label>
     <span class="xs muted">Põe 0 para desligar um lembrete. Os avisos aparecem sempre na página Hoje, mesmo sem notificações.</span>
   </section>`;
@@ -2120,7 +2124,7 @@ function evoChart(evo, maxDe){
 let dlgCb = null;
 function openDlg(title, inner, onOk, okLabel = "Guardar", extra = "", cancelLabel = "Cancelar"){
   const f = $("#dlgForm");
-  delete f.dataset.tipoMan;
+  delete f.dataset.tipoMan; delete f.dataset.sim;
   f.innerHTML = `<h2>${esc(title)}</h2>${inner}<div class="dlg-actions">${extra}<button class="btn ghost" value="cancel" formnovalidate>${esc(cancelLabel)}</button>${onOk ? `<button class="btn" value="ok">${esc(okLabel)}</button>` : ""}</div>`;
   dlgCb = onOk;
   const d = $("#dlg"); d.returnValue = "cancel"; d.showModal();
@@ -2518,7 +2522,7 @@ document.addEventListener("change", e => {
   else if (c === "rep-sel"){ const f = el.form || el.closest("form"); if (f){ f.querySelector(".rep-w").hidden = el.value !== "semanal"; f.querySelector(".rep-m").hidden = el.value !== "mensal"; } }
   else if (c === "aviso"){ setCfg({avisos:Object.assign(avisos(), {[el.dataset.k]:Math.max(0, Math.round(pnum(el.value)))})}); save(); render(); }
   else if (c === "aviso-bool"){ setCfg({avisos:Object.assign(avisos(), {[el.dataset.k]:el.checked})}); save(); }
-  else if (c === "aviso-hora"){ if (el.value){ setCfg({avisos:Object.assign(avisos(), {resumoHora:el.value})}); save(); } }
+  else if (c === "aviso-hora"){ if (el.value){ setCfg({avisos:Object.assign(avisos(), {[el.dataset.k || "resumoHora"]:el.value})}); save(); } }
   else if (c === "cfg-num"){ setCfg({[el.dataset.k]:pnum(el.value)}); save(); render(); }
   else if (c === "hdia-pick"){ if (el.value) setDia(el.value); }
   else if (c === "treino-sel"){ UI.treinoSel[t] = el.value; render(); }
@@ -2698,6 +2702,7 @@ function vCreditos(){
       <div style="display:flex;gap:8px;flex-wrap:wrap">
         <button class="btn sm" type="button" data-a="cred-pag" data-id="${c.id}">+ Pagamento</button>
         <button class="btn sm ghost" type="button" data-a="cred-saldo" data-id="${c.id}">Atualizar valor em dívida</button>
+        ${x.div > 0 ? `<button class="btn sm ghost" type="button" data-a="cred-sim" data-id="${c.id}">Simular amortização</button>` : ""}
         <button class="linkbtn" type="button" data-a="cred-edit" data-id="${c.id}">Editar</button>
       </div>
     </section>`;
@@ -2773,6 +2778,154 @@ Object.assign(A, {
   "cred-modo": el => { UI.credModo = el.dataset.v; render(); },
   "cred-proj": () => { UI.credProj = UI.credProj !== true; render(); },
   "cred-del": el => { const id = el.dataset.id; $("#dlg").close("cancel"); setTimeout(() => openDlg("Apagar este crédito?", '<span class="small">Apaga o crédito e todos os pagamentos registados.</span>', () => { remove("creditos", id); live("credMov").filter(m => m.cred === id).forEach(m => remove("credMov", m.id)); save(); render(); toast("Crédito apagado."); }, "Apagar"), 50); }
+});
+
+/* ============================================================
+   dia. — prazos e documentos, subscrições, simulador de amortização
+   ============================================================ */
+function addMeses(k, n){ const d = pdk(k), dia = d.getDate(); d.setDate(1); d.setMonth(d.getMonth() + n); d.setDate(Math.min(dia, new Date(d.getFullYear(), d.getMonth() + 1, 0).getDate())); return dk(d); }
+function emDias(k){ return Math.round((pdk(k) - pdk(today())) / 864e5); }
+function quandoTxt(n){ return n < 0 ? `há ${-n} dia${n === -1 ? "" : "s"}` : n === 0 ? "hoje" : n === 1 ? "amanhã" : n < 60 ? `daqui a ${n} dias` : n < 548 ? `daqui a ${Math.round(n / 30.4)} meses` : `daqui a ${num(n / 365, 0)} anos`; }
+
+/* ---------- prazos e documentos ---------- */
+function PRAZO_REP(){ return [["0","Não repete"],["12","Todos os anos"],["24","De 2 em 2 anos"],["60","De 5 em 5 anos"],["120","De 10 em 10 anos"],["6","De 6 em 6 meses"]]; }
+function PRAZO_SUG(){ return [["IUC", 12, 30], ["Seguro do carro", 12, 30], ["Inspeção do carro", 12, 30], ["Revisão do carro", 12, 30], ["Cartão de cidadão", 120, 60], ["Carta de condução", 120, 60], ["Seguro de vida", 12, 30], ["IRS", 12, 30]]; }
+function prazosOrd(){ return live("prazos").slice().sort((a, b) => (a.data || "9").localeCompare(b.data || "9")); }
+function prazoDias(p){ return +p.aviso > 0 ? +p.aviso : 30; }
+function prazosAviso(){ return prazosOrd().filter(p => p.data && emDias(p.data) <= prazoDias(p)); }
+function dlgPrazo(p = {}){
+  openDlg(p.id ? "Editar prazo" : "Novo prazo", `<label class="field">O quê<input name="nome" required value="${esc(p.nome || "")}" placeholder="Ex.: IUC, inspeção, cartão de cidadão" list="prazoSug"><datalist id="prazoSug">${PRAZO_SUG().map(s => `<option value="${esc(s[0])}">`).join("")}</datalist></label>
+    <div class="fields"><label class="field">Data limite<input type="date" name="data" required value="${esc(p.data || "")}"></label>
+    <label class="field">Repete<select name="rep">${opt(PRAZO_REP(), String(p.rep ?? 12))}</select></label>
+    <label class="field">Avisar antes (dias)<input name="aviso" inputmode="numeric" value="${esc(p.aviso || 30)}"></label></div>
+    <label class="field">Nota (opcional)<input name="nota" value="${esc(p.nota || "")}" placeholder="Ex.: matrícula, n.º da apólice, valor"></label>`,
+  o => { if (!o.data) throw new Error("Indica a data."); put("prazos", {id:p.id, nome:o.nome.trim(), data:o.data, rep:+o.rep || 0, aviso:Math.max(1, Math.round(pnum(o.aviso)) || 30), nota:o.nota.trim()}); save(); render(); toast("Prazo guardado."); },
+  "Guardar", p.id ? `<button class="btn danger" type="button" data-a="del-prazo" data-id="${p.id}" style="margin-right:auto">Apagar</button>` : "");
+}
+/* «Tratado»: passa para a próxima data (ou arquiva se não repete) */
+function prazoTratado(id){
+  const p = byId("prazos", id); if (!p) return;
+  if (+p.rep > 0){ let n = addMeses(p.data, +p.rep); while (n < today()) n = addMeses(n, +p.rep); put("prazos", {id, data:n, ult:today()}); toast(`Feito. Próximo: ${shortDate(n)}.`); }
+  else { remove("prazos", id); toast("Feito."); }
+  save(); render();
+}
+function prazosCard(){
+  const ps = prazosOrd();
+  return `<section class="card" aria-label="Prazos e documentos">
+    <div class="card-head"><h2>Prazos e documentos</h2><button class="btn sm" type="button" data-a="add-prazo">+ Prazo</button></div>
+    <div class="list">${ps.map(p => { const n = emDias(p.data), urg = n <= prazoDias(p);
+      return `<div class="item"><span class="chip ${n < 0 ? "c-alta" : urg ? "c-media" : "c-x"}" style="min-width:58px;justify-content:center">${n < 0 ? "Passou" : n <= 60 ? n + " d" : shortDate(p.data).slice(4)}</span>
+        <div class="grow"><div class="t">${esc(p.nome)}</div><div class="s">${longDate(p.data)}${p.data.slice(0, 4) !== today().slice(0, 4) ? " " + p.data.slice(0, 4) : ""} · ${quandoTxt(n)}${+p.rep ? " · " + PRAZO_REP().find(r => +r[0] === +p.rep)[1].toLowerCase() : ""}${p.nota ? " · " + esc(p.nota) : ""}</div></div>
+        ${urg ? `<button class="btn sm ghost" type="button" data-a="prazo-ok" data-id="${p.id}">Tratado</button>` : ""}<button class="linkbtn" type="button" data-a="edit-prazo" data-id="${p.id}">Editar</button></div>`; }).join("")
+      || `<div class="empty">IUC, seguro, inspeção, cartão de cidadão… a app avisa com antecedência.</div><div style="display:flex;gap:6px;flex-wrap:wrap">${PRAZO_SUG().slice(0, 5).map(s => `<button class="btn sm ghost" type="button" data-a="add-prazo" data-nome="${esc(s[0])}" data-rep="${s[1]}" data-aviso="${s[2]}">+ ${esc(s[0])}</button>`).join("")}</div>`}</div>
+  </section>`;
+}
+
+/* ---------- subscrições ---------- */
+function FREQ_SUB(){ return [["mensal","Mensal"],["anual","Anual"],["trimestral","Trimestral"],["semanal","Semanal"]]; }
+function subMeses(f){ return ({mensal:1, trimestral:3, anual:12})[f] || 0; }
+function subProxima(s){
+  let k = s.data || today(); const t = today(), m = subMeses(s.freq);
+  if (s.freq === "semanal"){ while (k < t) k = addDays(k, 7); return k; }
+  let i = 0; while (k < t && i++ < 600) k = addMeses(s.data, m * i);
+  return k;
+}
+function subMensal(s){ return s.freq === "anual" ? (+s.valor || 0) / 12 : s.freq === "trimestral" ? (+s.valor || 0) / 3 : s.freq === "semanal" ? (+s.valor || 0) * 52 / 12 : (+s.valor || 0); }
+function subsAviso(){ return live("assinaturas").map(s => ({s, k:subProxima(s)})).filter(x => emDias(x.k) <= (+x.s.aviso || 3)); }
+function dlgSub(s = {}){
+  openDlg(s.id ? "Editar subscrição" : "Nova subscrição", `<label class="field">Nome<input name="nome" required value="${esc(s.nome || "")}" placeholder="Ex.: Netflix, ginásio, Spotify"></label>
+    <div class="fields"><label class="field">Valor (€)<input name="valor" inputmode="decimal" required value="${s.valor ? esc(num(s.valor, 2)) : ""}"></label>
+    <label class="field">Pagamento<select name="freq">${opt(FREQ_SUB(), s.freq || "mensal")}</select></label></div>
+    <div class="fields"><label class="field">Próxima renovação<input type="date" name="data" required value="${esc(s.id ? subProxima(s) : (s.data || ""))}"></label>
+    <label class="field">Avisar antes (dias)<input name="aviso" inputmode="numeric" value="${esc(s.aviso || 3)}"></label></div>
+    <label class="field">Categoria<select name="cat">${opt(cats(), s.cat || guessCat(s.nome || "") || "Lazer")}</select></label>`,
+  o => { const v = pnum(o.valor); if (!v) throw new Error("Indica o valor."); if (!o.data) throw new Error("Indica a data da próxima renovação."); put("assinaturas", {id:s.id, nome:o.nome.trim(), valor:v, freq:o.freq, data:o.data, aviso:Math.max(0, Math.round(pnum(o.aviso))), cat:o.cat}); save(); render(); toast("Subscrição guardada."); },
+  "Guardar", s.id ? `<button class="btn danger" type="button" data-a="del-sub" data-id="${s.id}" style="margin-right:auto">Apagar</button>` : "");
+}
+function subsCard(){
+  const ss = live("assinaturas").map(s => ({s, k:subProxima(s)})).sort((a, b) => a.k.localeCompare(b.k));
+  const mes = ss.reduce((a, x) => a + subMensal(x.s), 0);
+  const ja = new Set(ss.map(x => normDesc(x.s.nome)));
+  const det = repetidos().filter(r => !ja.has(normDesc(r.nome))).slice(0, 4);
+  return `<section class="card" aria-label="Subscrições">
+    <div class="card-head"><h2>Subscrições</h2><button class="btn sm" type="button" data-a="add-sub">+ Nova</button></div>
+    ${ss.length ? `<div style="display:flex;gap:18px;flex-wrap:wrap"><div><div class="xs muted" style="font-weight:700">Por mês</div><div class="mid">${eur(mes)}</div></div><div><div class="xs muted" style="font-weight:700">Por ano</div><div class="mid">${eur0(mes * 12)}</div></div></div>` : ""}
+    <div class="list">${ss.map(({s, k}) => { const n = emDias(k);
+      return `<div class="item"><div class="grow"><div class="t">${esc(s.nome)}</div><div class="s">${eur(s.valor)} ${({mensal:"por mês", anual:"por ano", trimestral:"por trimestre", semanal:"por semana"})[s.freq] || ""} · renova ${quandoTxt(n)}${n > 1 ? ` (${shortDate(k)})` : ""}</div></div>${n <= (+s.aviso || 3) ? '<span class="chip c-media">Em breve</span>' : ""}<button class="linkbtn" type="button" data-a="edit-sub" data-id="${s.id}">Editar</button></div>`; }).join("") || '<div class="empty">Netflix, Spotify, ginásio, telemóvel… vês o total por mês e por ano e recebes aviso antes de renovar.</div>'}</div>
+    ${det.length ? `<div class="xs muted" style="font-weight:700">Encontrei nos teus gastos</div><div class="list">${det.map(r => `<div class="item"><div class="grow"><div class="t">${esc(r.nome)}</div><div class="s">${eur(r.valor)} · ${r.meses} meses seguidos</div></div><button class="btn sm ghost" type="button" data-a="add-sub" data-nome="${esc(r.nome)}" data-valor="${r.valor}" data-cat="${esc(r.cat || "")}">+ Juntar</button></div>`).join("")}</div>` : ""}
+  </section>`;
+}
+
+/* ---------- simulador de amortização ---------- */
+/* paga o crédito mês a mês: devolve meses e juros totais */
+function simular(D, r, P){
+  if (D <= 0) return {n:0, juros:0};
+  if (P <= D * r) return null;
+  let n = 0, j = 0;
+  while (D > .005 && n < 1200){ const ji = D * r; j += ji; D = D + ji - P; n++; if (D < 0){ D = 0; } }
+  return {n, juros:r2(j)};
+}
+function simCalc(c, A, com, modo){
+  const x = credInfo(c), r = (+c.taxa || 0) / 1200, P = +c.prestacao || 0, D = x.div;
+  A = Math.min(Math.max(0, A), D);
+  const base = simular(D, r, P); if (!base) return {erro:"A prestação não chega para pagar os juros: confirma a prestação e a TAN."};
+  const comissao = r2(A * (com || 0) / 100), D1 = r2(D - A);
+  if (modo === "prestacao"){
+    const n = base.n, P1 = D1 <= 0 ? 0 : r > 0 ? D1 * r / (1 - Math.pow(1 + r, -n)) : D1 / n;
+    const s = simular(D1, r, P1 + 1e-9) || {n, juros:0};
+    return {D, A, D1, comissao, base, novo:{n, juros:s.juros, P:r2(P1)}, poupa:r2(base.juros - s.juros - comissao), menos:0, P};
+  }
+  const s = simular(D1, r, P) || {n:0, juros:0};
+  return {D, A, D1, comissao, base, novo:{n:s.n, juros:s.juros, P}, poupa:r2(base.juros - s.juros - comissao), menos:base.n - s.n, P};
+}
+function anosMeses(n){ const a = Math.floor(n / 12), m = n % 12; return [a ? `${a} ano${a > 1 ? "s" : ""}` : "", m ? `${m} ${m > 1 ? "meses" : "mês"}` : ""].filter(Boolean).join(" e ") || "0 meses"; }
+function simHtml(c, f){
+  const A = pnum(f.valor.value), com = pnum(f.com.value), modo = f.modo.value;
+  if (!(+c.prestacao > 0)) return '<div class="small" style="color:var(--red)">Indica primeiro a prestação mensal deste crédito (Editar).</div>';
+  if (!A) return '<div class="small muted">Escreve o valor que pensas amortizar.</div>';
+  const s = simCalc(c, A, com, modo); if (s.erro) return `<div class="small" style="color:var(--red)">${s.erro}</div>`;
+  const semTaxa = !(+c.taxa > 0);
+  return `<div class="kpis" style="grid-template-columns:repeat(auto-fit,minmax(130px,1fr))">
+      <div class="kpi inv"><div class="l">Poupas em juros</div><div class="v">${semTaxa ? "—" : eur0(s.poupa)}</div><div class="xs">${s.comissao ? `já descontada a comissão de ${eur(s.comissao)}` : semTaxa ? "indica a TAN para calcular" : "sem comissão"}</div></div>
+      ${modo === "prazo" ? `<div class="kpi"><div class="l">Acaba mais cedo</div><div class="v">${anosMeses(s.menos)}</div><div class="xs muted">${s.novo.n} prestações em vez de ${s.base.n}</div></div>`
+        : `<div class="kpi"><div class="l">Nova prestação</div><div class="v">${eur(s.novo.P)}</div><div class="xs muted">menos ${eur(s.P - s.novo.P)} por mês</div></div>`}
+    </div>
+    <div class="small muted">Em dívida passa de ${eur(s.D)} para ${eur(s.D1)}.${semTaxa ? "" : ` Juros até ao fim: ${eur(s.base.juros)} → ${eur(s.novo.juros)}.`}</div>`;
+}
+function dlgSimular(c){
+  openDlg(`Simular amortização · ${c.nome}`, `<div class="fields"><label class="field">Valor a amortizar (€)<input name="valor" inputmode="decimal" data-sim="1" placeholder="Ex.: 5000"></label>
+    <label class="field">Comissão (%)<input name="com" inputmode="decimal" data-sim="1" value="${+c.taxa ? "0,5" : "0"}"></label></div>
+    <div class="seg" role="radiogroup" aria-label="O que reduzir" style="align-self:flex-start"><label style="display:inline-flex;align-items:center;gap:6px;padding:8px 12px"><input type="radio" name="modo" value="prazo" data-sim="1" checked> Reduzir o prazo</label><label style="display:inline-flex;align-items:center;gap:6px;padding:8px 12px"><input type="radio" name="modo" value="prestacao" data-sim="1"> Reduzir a prestação</label></div>
+    <div id="simOut"><div class="small muted">Escreve o valor que pensas amortizar.</div></div>
+    <span class="xs muted">Comissão habitual: 0,5 % em taxa variável e 2 % em taxa fixa (crédito habitação). Simulação com a TAN e a prestação atuais: o banco pode dar valores ligeiramente diferentes.</span>`,
+  o => { const v = pnum(o.valor); if (!v) return; const x = credInfo(c); put("credMov", {cred:c.id, data:today(), valor:Math.min(v, x.div), nota:"Amortização antecipada", origem:"manual"});
+    if (o.modo === "prestacao"){ const s = simCalc(c, v, 0, "prestacao"); if (s.novo && s.novo.P) put("creditos", {id:c.id, prestacao:s.novo.P}); }
+    save(); render(); toast("Amortização registada."); }, "Registar esta amortização", "", "Fechar");
+  $("#dlgForm").dataset.sim = c.id;
+}
+document.addEventListener("input", e => {
+  const f = e.target.form; if (!f || f.id !== "dlgForm" || !f.dataset.sim || !e.target.dataset.sim) return;
+  const c = byId("creditos", f.dataset.sim); if (c) $("#simOut").innerHTML = simHtml(c, f);
+});
+document.addEventListener("change", e => { const f = e.target.form; if (f && f.id === "dlgForm" && f.dataset.sim && e.target.name === "modo"){ const c = byId("creditos", f.dataset.sim); if (c) $("#simOut").innerHTML = simHtml(c, f); } });
+
+/* avisos extra na página Hoje */
+function avisosMaisHtml(){
+  const out = [];
+  prazosAviso().forEach(p => { const n = emDias(p.data); out.push(`<a class="aviso ${n < 7 ? "red" : ""}" href="#tarefas">${ic("cal", 16)}<span><b>${esc(p.nome)}</b> ${n < 0 ? "passou o prazo" : "até " + shortDate(p.data) + " (" + quandoTxt(n) + ")"}</span></a>`); });
+  subsAviso().forEach(({s, k}) => out.push(`<a class="aviso" href="#gastos">${ic("repeat", 16)}<span><b>${esc(s.nome)}</b> renova ${quandoTxt(emDias(k))} · ${eur(s.valor)}</span></a>`));
+  return out.join("");
+}
+
+Object.assign(A, {
+  "add-prazo": el => dlgPrazo(el.dataset.nome ? {nome:el.dataset.nome, rep:+el.dataset.rep, aviso:+el.dataset.aviso} : {}),
+  "edit-prazo": el => dlgPrazo(byId("prazos", el.dataset.id)),
+  "prazo-ok": el => prazoTratado(el.dataset.id),
+  "del-prazo": el => { $("#dlg").close("cancel"); remove("prazos", el.dataset.id); save(); render(); toast("Prazo apagado."); },
+  "add-sub": el => dlgSub(el.dataset.nome ? {nome:el.dataset.nome, valor:+el.dataset.valor, cat:el.dataset.cat || undefined} : {}),
+  "edit-sub": el => dlgSub(byId("assinaturas", el.dataset.id)),
+  "del-sub": el => { $("#dlg").close("cancel"); remove("assinaturas", el.dataset.id); save(); render(); toast("Subscrição apagada."); },
+  "cred-sim": el => dlgSimular(byId("creditos", el.dataset.id))
 });
 
 /* ============================================================
