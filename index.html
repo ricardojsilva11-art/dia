@@ -338,7 +338,7 @@ pre{white-space:pre-wrap; overflow-wrap:anywhere; background:var(--soft); paddin
 /* ============================================================
    dia. — núcleo: dados, datas, sincronização, horário
    ============================================================ */
-const APP_VERSION = "1.5 · 29/10/2026";
+const APP_VERSION = "1.6 · 29/10/2026";
 const KEY = "dia-app-v1";
 const VENC_KEY = "vencimento-app-v1";
 const COLS = ["tarefas","eventos","gastos","fixos","refeicoes","agua","treinos","sessoes","inbox","turnos","saude"];
@@ -385,7 +385,7 @@ function toast(msg){ const t = $("#toast"); t.textContent = msg; t.hidden = fals
 function defaultState(){
   const s = { v:1,
     cfg:{ upd:0, nome:"", tema:"auto", accent:ACCENTS[0], treinoHora:"17:30",
-          horas:{M:["07:00","15:00"], T:["15:00","23:00"], N:["23:00","07:00"]},
+          horas:{M:["07:00","15:00"], T:["14:45","23:15"], N:["23:00","07:00"]},
           metas:{kcal:2200, p:140, h:250, g:73, agua:2.5},
           orc:Object.assign({}, DEFAULT_ORC) },
     venc:null, agendaOut:null, gstatus:null,
@@ -905,7 +905,7 @@ function vHoje(){
       <div class="card-head"><h2>Gastos hoje</h2><button class="linkbtn" type="button" data-a="add-gasto">+ Gasto</button></div>
       <div class="big">${eur(gHoje)}</div>
       <div class="spark" role="img" aria-label="Gastos dos últimos 7 dias">${days7.map((v, i) => `<i class="${i === 6 ? "on" : ""}" style="height:${Math.max(4, v / max7 * 100)}%" title="${eur(v)}"></i>`).join("")}</div>
-      <span class="small muted">${eur(gMes)}${orcTotal() ? ` de ${eur0(orcTotal())}` : ""} este mês</span>
+      <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap"><span class="small muted">${eur(gMes)}${orcTotal() ? ` de ${eur0(orcTotal())}` : ""} este mês</span><button class="linkbtn" type="button" data-a="orc">Mudar orçamento</button></div>
     </div>
     <div class="card inv">
       <div class="card-head"><h2>Treino${trs[0] ? " · " + esc(trs[0].hora || S.cfg.treinoHora) : ""}</h2>${s === "N" ? '<span class="chip c-N">Noite</span>' : ""}</div>
@@ -1231,6 +1231,12 @@ function vDef(){
       <h2>Horas dos turnos</h2>
       <div class="fields">${["M","T","N"].map(s => `<label class="field">Início ${s}<input type="time" data-c="hora" data-s="${s}" data-i="0" value="${esc(c.horas[s][0])}"></label><label class="field">Fim ${s}<input type="time" data-c="hora" data-s="${s}" data-i="1" value="${esc(c.horas[s][1])}"></label>`).join("")}</div>
       <label class="field">Hora habitual do treino<input type="time" data-c="cfg" data-k="treinoHora" value="${esc(c.treinoHora)}"></label>
+    </section>
+
+    <section class="card">
+      <div class="card-head"><h2>Orçamento mensal</h2><b class="mid">${eur0(orcTotal())}</b></div>
+      <span class="small muted">${Object.entries(c.orc || {}).filter(([, v]) => +v > 0).map(([k, v]) => `${esc(k)} ${eur0(v)}`).join(" · ") || "Sem orçamento definido."}</span>
+      <div><button class="btn sm" type="button" data-a="orc">Editar orçamento</button></div>
     </section>
 
     <section class="card">
