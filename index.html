@@ -338,7 +338,7 @@ pre{white-space:pre-wrap; overflow-wrap:anywhere; background:var(--soft); paddin
 /* ============================================================
    dia. — núcleo: dados, datas, sincronização, horário
    ============================================================ */
-const APP_VERSION = "1.8 · 29/10/2026";
+const APP_VERSION = "1.9 · 29/10/2026";
 const KEY = "dia-app-v1";
 const VENC_KEY = "vencimento-app-v1";
 const COLS = ["tarefas","eventos","gastos","fixos","refeicoes","agua","treinos","sessoes","inbox","turnos","saude","poupObj","poupMov","poupAuto"];
@@ -388,7 +388,7 @@ function defaultState(){
           horas:{M:["07:00","15:00"], T:["14:45","23:15"], N:["23:00","07:00"]},
           metas:{kcal:2200, p:140, h:250, g:73, agua:2.5},
           orc:Object.assign({}, DEFAULT_ORC) },
-    venc:null, agendaOut:null, gstatus:null,
+    venc:null, agendaOut:null, gstatus:null, analise:null,
     local:{ sync:{url:"", code:"", last:0, err:""} } };
   COLS.forEach(c => s[c] = []);
   return s;
@@ -431,7 +431,7 @@ function mergeState(a, b){
   if (!b) return a;
   const out = Object.assign({}, a);
   out.cfg = (b.cfg && (b.cfg.upd || 0) > (a.cfg.upd || 0)) ? Object.assign({}, a.cfg, b.cfg) : a.cfg;
-  ["venc","agendaOut","gstatus"].forEach(k => { out[k] = (b[k] && (!a[k] || (b[k].upd || 0) > (a[k].upd || 0))) ? b[k] : (a[k] || null); });
+  ["venc","agendaOut","gstatus","analise"].forEach(k => { out[k] = (b[k] && (!a[k] || (b[k].upd || 0) > (a[k].upd || 0))) ? b[k] : (a[k] || null); });
   const cols = new Set(COLS);
   Object.keys(a).concat(Object.keys(b)).forEach(k => { if (k !== "local" && (Array.isArray(a[k]) || Array.isArray(b[k]))) cols.add(k); });
   cols.forEach(c => {
@@ -634,6 +634,26 @@ const CAT_HINTS = [
   ["Lazer", /netflix|spotify|disney|hbo|cinema|fnac|steam|playstation|bilhete|teatro/i]
 ];
 function guessCat(desc){ const c = cats(); for (const [k, re] of CAT_HINTS) if (re.test(desc || "") && c.includes(k)) return k; return c.includes("Outros") ? "Outros" : c[c.length - 1]; }
+/* gasto igual já registado (mesma data e valor) */
+const gastoExiste = it => live("gastos").some(g => g.data === it.data && Math.abs((+g.valor || 0) - pnum(it.valor)) < .01);
+/* nome do comerciante para agrupar */
+const normDesc = d => String(d || "").toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/\d+/g, "").replace(/[^a-z ]/g, " ").replace(/\s+/g, " ").trim().split(" ").slice(0, 2).join(" ");
+/* pagamentos que se repetem todos os meses (prováveis subscrições) */
+function repetidos(){
+  const t = today(), desde = addDays(t, -120), grupos = {};
+  live("gastos").filter(g => g.data >= desde && g.origem !== "fixo").forEach(g => { const k = normDesc(g.desc); if (k) (grupos[k] = grupos[k] || []).push(g); });
+  return Object.values(grupos).map(arr => {
+    const meses = new Set(arr.map(g => ym(g.data))), vals = arr.map(g => +g.valor || 0), med = vals.reduce((a, b) => a + b, 0) / vals.length;
+    const parecidos = vals.every(v => Math.abs(v - med) <= Math.max(1, med * .15));
+    return {nome:arr[arr.length - 1].desc, valor:r2(med), meses:meses.size, n:arr.length, cat:arr[0].cat, ok:meses.size >= 2 && parecidos && arr.length <= meses.size + 1};
+  }).filter(x => x.ok).sort((a, b) => b.valor - a.valor);
+}
+function topComerciantes(dias = 90){
+  const desde = addDays(today(), -dias), g = {};
+  live("gastos").filter(x => x.data >= desde).forEach(x => { const k = normDesc(x.desc) || x.cat; g[k] = g[k] || {nome:x.desc || x.cat, total:0, n:0}; g[k].total += +x.valor || 0; g[k].n++; });
+  return Object.values(g).sort((a, b) => b.total - a.total).slice(0, 8);
+}
+
 /* lança as despesas fixas do mês corrente (id fixo evita duplicados entre aparelhos) */
 function applyFixos(){
   const t = today(), m = ym(t), day = +t.slice(8);
@@ -758,13 +778,13 @@ function aiCard(sec, sub, tipos){
   const res = (UI.ai[sec] || []).map((f, fi) => {
     if (f.estado === "busy") return `<div class="result"><div class="card-head"><b class="small">${esc(f.nome)}</b><span class="xs muted">A ler…</span></div><div class="progress"><i></i></div></div>`;
     if (f.estado === "erro") return `<div class="result"><div class="card-head"><b class="small">${esc(f.nome)}</b><span class="chip c-alta">Erro</span></div><span class="small">${esc(f.erro)}</span><div><button class="btn sm ghost" type="button" data-a="ai-clear" data-sec="${sec}" data-i="${fi}">Fechar</button></div></div>`;
-    const pend = f.itens.filter(i => !i._ok).length;
+    const pend = f.itens.filter(i => !i._ok && !i._dup).length;
     return `<div class="result">
       <div class="card-head"><b class="small">${esc(f.nome)}</b><span class="chip c-ok">Lido</span></div>
       ${f.resumo ? `<span class="small muted">${esc(f.resumo)}</span>` : ""}
       <div class="list">${f.itens.map((it, ii) => `<div class="item"><div class="grow"><div class="t">${esc(itemTitle(it))}</div><div class="s">${esc(itemSub(it))}</div></div>
-        ${it._ok ? '<span class="chip c-ok">Adicionado</span>' : `<button class="btn sm" type="button" data-a="ai-add" data-sec="${sec}" data-i="${fi}" data-j="${ii}">Adicionar</button>`}</div>`).join("") || '<div class="empty">Não encontrei nada para registar neste documento.</div>'}</div>
-      <div class="dlg-actions">${pend > 1 ? `<button class="btn sm" type="button" data-a="ai-addall" data-sec="${sec}" data-i="${fi}">Adicionar tudo (${pend})</button>` : ""}<button class="btn sm ghost" type="button" data-a="ai-clear" data-sec="${sec}" data-i="${fi}">Fechar</button></div>
+        ${it._ok ? '<span class="chip c-ok">Adicionado</span>' : it._dup ? '<span class="chip c-x">Já existe</span>' : `<button class="btn sm" type="button" data-a="ai-add" data-sec="${sec}" data-i="${fi}" data-j="${ii}">Adicionar</button>`}</div>`).join("") || '<div class="empty">Não encontrei nada para registar neste documento.</div>'}</div>
+      <div class="dlg-actions">${f.extrato && !pend ? `<button class="btn sm acc" type="button" data-a="analisar">Analisar os meus gastos</button>` : ""}${pend > 1 ? `<button class="btn sm" type="button" data-a="ai-addall" data-sec="${sec}" data-i="${fi}">Adicionar ${f.extrato ? "os " + pend + " gastos" : "tudo (" + pend + ")"}</button>` : ""}<button class="btn sm ghost" type="button" data-a="ai-clear" data-sec="${sec}" data-i="${fi}">Fechar</button></div>
     </div>`;
   }).join("");
   const on = syncOn();
@@ -1211,7 +1231,8 @@ function vGastos(){
       </section>
     </div>
     <div class="side-col">
-      ${aiCard("gastos", "Lê faturas, talões e extratos e põe cada gasto na categoria certa", "Faturas PDF, talões, extrato CSV/Excel")}
+      ${aiCard("gastos", "Arrasta o extrato do banco: cada movimento entra na categoria certa e os repetidos ficam de fora", "Extrato PDF, CSV ou Excel, faturas, talões")}
+      ${poupCard()}
       <section class="card">
         <div class="card-head"><h2>Despesas fixas</h2><button class="btn sm" type="button" data-a="edit-fixo">+ Fixa</button></div>
         <span class="xs muted">Entram sozinhas em Gastos no dia de cada mês.</span>
@@ -1369,6 +1390,27 @@ function vPoup(){
   </div>`;
 }
 
+/* ---------- onde podes poupar ---------- */
+function poupCard(){
+  const a = S.analise, rep = repetidos(), top = topComerciantes();
+  const tipoChip = {cortar:"c-alta", reduzir:"c-media", trocar:"c-ia", rever:"c-x"};
+  return `<section class="card">
+    <div class="card-head"><h2>Onde podes poupar</h2><button class="btn sm ${a ? "ghost" : "acc"}" type="button" data-a="analisar" ${UI.analisando ? "disabled" : ""}>${UI.analisando ? "A analisar…" : a ? "Analisar de novo" : "Analisar os meus gastos"}</button></div>
+    ${UI.analisando ? '<div class="progress" style="background:var(--soft)"><i></i></div>' : ""}
+    ${a ? `<span class="xs muted">Análise de ${new Date(a.quando).toLocaleDateString("pt-PT")} · ${a.nGastos || ""} gastos dos últimos 3 meses</span>
+      ${a.poupancaPossivel ? `<div style="display:flex;align-items:baseline;gap:8px;flex-wrap:wrap"><span class="mid" style="color:var(--green)">${eur(a.poupancaPossivel)}</span><span class="small muted">por mês que podes poupar</span></div>` : ""}
+      <p class="small" style="margin:0">${esc(a.resumo)}</p>
+      <div class="list">${(a.pontos || []).map(p => `<div class="item" style="align-items:flex-start;padding:10px 0"><div class="grow"><div class="t">${esc(p.titulo)} ${p.tipo ? `<span class="chip ${tipoChip[p.tipo] || "c-x"}">${esc(p.tipo)}</span>` : ""}</div><div class="s" style="margin-top:2px">${esc(p.detalhe)}</div></div>
+        ${+p.valorMensal > 0 ? `<button class="btn sm ghost" type="button" data-a="poupar-isto" data-v="${+p.valorMensal}" title="Criar poupança automática com este valor">Poupar ${eur0(p.valorMensal)}/mês</button>` : ""}</div>`).join("")}</div>
+      ${(a.acimaOrcamento || []).length ? `<div class="small"><b>Acima do orçamento:</b> ${a.acimaOrcamento.map(x => `${esc(x.cat)} (${eur0(x.gasto)} de ${eur0(x.orcamento)})`).join(" · ")}</div>` : ""}
+      ${(a.boasPraticas || []).length ? `<div class="small muted"><b style="color:var(--ink)">O que já fazes bem:</b> ${a.boasPraticas.map(esc).join(" · ")}</div>` : ""}`
+    : `<span class="small muted">Importa um ou mais extratos (arrasta-os para o Assistente IA acima) e carrega em <b>Analisar</b>. A IA mostra onde gastas sem necessidade, as subscrições que pagas e quanto podes poupar por mês.</span>`}
+    ${rep.length ? `<h3 class="group-title">Pagamentos que se repetem</h3><div class="list">${rep.slice(0, 8).map(r => `<div class="item"><div class="grow"><div class="t">${esc(r.nome)}</div><div class="s">${r.meses} meses seguidos · ${esc(r.cat || "")}</div></div><span class="amount">${eur(r.valor)}</span></div>`).join("")}</div>
+      <span class="xs muted">Total: ${eur(rep.reduce((x, r) => x + r.valor, 0))} por mês. Vê se ainda usas todos.</span>` : ""}
+    ${top.length ? `<h3 class="group-title">Onde gastas mais (90 dias)</h3><div class="list">${top.slice(0, 5).map(c => `<div class="item"><div class="grow"><div class="t">${esc(c.nome)}</div><div class="s">${c.n} ${c.n === 1 ? "vez" : "vezes"}</div></div><span class="amount">${eur(c.total)}</span></div>`).join("")}</div>` : ""}
+  </section>`;
+}
+
 /* ============================================================
    dia. — ações, diálogos, IA e arranque
    ============================================================ */
@@ -1480,7 +1522,7 @@ function dlgSheet(){
 }
 
 /* ---------- poupança ---------- */
-function dlgObj(o = {}){
+function dlgObj(o = {}, depois){
   openDlg(o.id ? "Editar objetivo" : "Novo objetivo de poupança", `<label class="field">Nome<input name="nome" required value="${esc(o.nome || "")}" placeholder="Ex.: Férias, Fundo de emergência, Carro"></label>
     <div class="fields"><label class="field">Quanto queres juntar (€)<input name="alvo" inputmode="decimal" value="${o.alvo ? esc(num(o.alvo, 2)) : ""}" placeholder="Opcional"></label><label class="field">Até quando<input type="date" name="data" value="${esc(o.data || "")}"></label></div>
     ${o.id ? "" : `<label class="field">Já tens algum valor guardado? (€)<input name="ini" inputmode="decimal" placeholder="0"></label>`}`,
@@ -1488,6 +1530,7 @@ function dlgObj(o = {}){
     const n = put("poupObj", {id:o.id, nome:v.nome.trim(), alvo:pnum(v.alvo), data:v.data});
     if (!o.id && pnum(v.ini)) put("poupMov", {obj:n.id, data:today(), valor:pnum(v.ini), nota:"Valor inicial"});
     save(); render();
+    if (depois) setTimeout(() => depois(n), 80);
   }, "Guardar", o.id ? `<button class="btn danger" type="button" data-a="del-obj" data-id="${o.id}" style="margin-right:auto">Apagar</button>` : "");
 }
 function dlgMov(objId, sinal = 1, valor){
@@ -1498,11 +1541,28 @@ function dlgMov(objId, sinal = 1, valor){
     <label class="field">Nota<input name="nota" placeholder="Opcional"></label>`,
   v => { const x = Math.abs(pnum(v.valor)); if (!x) throw new Error("Indica o valor."); put("poupMov", {obj:v.obj, data:v.data || today(), valor:sinal * x, nota:v.nota.trim(), origem:"manual"}); save(); render(); toast(sinal > 0 ? "Depósito registado." : "Levantamento registado."); }, sinal > 0 ? "Depositar" : "Retirar");
 }
+async function analisarGastos(){
+  if (!syncOn()){ toast("A análise usa a IA: liga primeiro o servidor nas Definições."); return; }
+  const t = today(), desde = addDays(t, -92), gs = live("gastos").filter(g => g.data >= desde);
+  if (gs.length < 5){ toast("Ainda há poucos gastos. Importa um extrato ou regista mais gastos primeiro."); return; }
+  UI.analisando = true; render();
+  const porMes = {};
+  gs.forEach(g => { const m = ym(g.data); porMes[m] = porMes[m] || {}; porMes[m][g.cat || "Outros"] = r2((porMes[m][g.cat || "Outros"] || 0) + (+g.valor || 0)); });
+  const ctx = {hoje:t, orcamentoMensal:S.cfg.orc, totalPorMesECategoria:porMes, despesasFixas:live("fixos").map(f => ({desc:f.desc, valor:f.valor, cat:f.cat})),
+    pagamentosRepetidos:repetidos(), maioresComerciantes:topComerciantes(), objetivosPoupanca:live("poupObj").map(o => ({nome:o.nome, alvo:o.alvo, guardado:saldoObj(o.id), ate:o.data})),
+    gastos:gs.sort((a, b) => a.data.localeCompare(b.data)).slice(-800).map(g => ({data:g.data, valor:g.valor, desc:g.desc, cat:g.cat}))};
+  try{
+    const j = await api("/api/analise", {ctx});
+    S.analise = Object.assign({upd:Date.now(), quando:Date.now(), nGastos:gs.length}, j); save();
+    toast("Análise pronta.");
+  }catch(e){ toast("Não consegui analisar: " + e.message); }
+  UI.analisando = false; render();
+}
 function dlgAuto(a = {}){
   const objs = live("poupObj");
-  if (!objs.length){ toast("Primeiro cria o objetivo para onde vai o dinheiro (ex.: Férias)."); return dlgObj(); }
+  if (!objs.length){ toast("Primeiro cria o objetivo para onde vai o dinheiro (ex.: Férias)."); return dlgObj({}, n => dlgAuto(Object.assign({}, a, {obj:n.id}))); }
   openDlg(a.id ? "Editar poupança automática" : "Nova poupança automática", `<label class="field">Objetivo<select name="obj">${opt(objs.map(o => [o.id, o.nome]), a.obj || (objs[0] || {}).id)}</select></label>
-    <div class="fields"><label class="field">Valor por mês (€)<input name="valor" inputmode="decimal" required value="${a.valor ? esc(num(a.valor, 2)) : ""}"></label><label class="field">Dia do mês<input name="dia" inputmode="numeric" required value="${esc(a.dia || 25)}"></label></div>
+    <div class="fields"><label class="field">Valor por mês (€)<input name="valor" inputmode="decimal" required value="${a.valor ? esc(num(r2(a.valor), 2)) : ""}"></label><label class="field">Dia do mês<input name="dia" inputmode="numeric" required value="${esc(a.dia || 25)}"></label></div>
     <span class="xs muted">Dica: põe o dia a seguir ao dia em que recebes o vencimento.</span>`,
   v => { put("poupAuto", {id:a.id, obj:v.obj, valor:Math.abs(pnum(v.valor)), dia:Math.min(31, Math.max(1, Math.round(pnum(v.dia)) || 1)), desde:a.desde || today()}); applyPoupAuto(); save(); render(); });
 }
@@ -1552,7 +1612,11 @@ async function aiFiles(files, sec){
         itens = itens.filter(i => i.tipo !== "turno").concat(diff);
         resumo = `${resumo} ${turnos.length} dias lidos · ${diff.length} diferente${diff.length === 1 ? "" : "s"} do horário atual.`.trim();
       }
-      Object.assign(entry, {estado:"ok", resumo, itens});
+      const novos = itens.filter(i => i.tipo === "gasto");
+      novos.forEach(i => { i.data = i.data || today(); if (gastoExiste(i)) i._dup = true; });
+      const dups = novos.filter(i => i._dup).length;
+      if (dups) resumo = `${resumo} ${dups} já ${dups === 1 ? "estava registado" : "estavam registados"} e fica${dups === 1 ? "" : "m"} de fora.`.trim();
+      Object.assign(entry, {estado:"ok", resumo, itens, extrato:novos.length >= 5});
     }catch(e){ Object.assign(entry, {estado:"erro", erro:String(e.message || e)}); }
     softRender();
   }
@@ -1597,7 +1661,9 @@ const A = {
   "inbox-ok": el => { const x = byId("inbox", el.dataset.id); if (x){ applyItem(x.dados || {}, (x.dados && x.dados.origem) || "auto"); put("inbox", {id:x.id, estado:"ok"}); save(); render(); toast("Registado."); } },
   "inbox-no": el => { put("inbox", {id:el.dataset.id, estado:"rejeitado"}); save(); render(); },
   "ai-add": el => { const f = UI.ai[el.dataset.sec][+el.dataset.i], it = f.itens[+el.dataset.j]; applyItem(it); it._ok = true; save(); render(); toast("Adicionado."); },
-  "ai-addall": el => { const f = UI.ai[el.dataset.sec][+el.dataset.i]; f.itens.filter(i => !i._ok).forEach(i => { applyItem(i); i._ok = true; }); save(); render(); toast("Tudo adicionado."); },
+  "ai-addall": el => { const f = UI.ai[el.dataset.sec][+el.dataset.i]; const n = f.itens.filter(i => !i._ok && !i._dup); n.forEach(i => { applyItem(i); i._ok = true; }); save(); render(); toast(`${n.length} ${n.length === 1 ? "registo adicionado" : "registos adicionados"}.`); if (f.extrato && syncOn()) setTimeout(() => toast("Já podes analisar os teus gastos em «Onde podes poupar»."), 2500); },
+  "analisar": () => analisarGastos(),
+  "poupar-isto": el => dlgAuto({valor:+el.dataset.v}),
   "ai-clear": el => { UI.ai[el.dataset.sec].splice(+el.dataset.i, 1); render(); },
   "tema": el => { setCfg({tema:el.dataset.v}); save(); render(); },
   "accent": el => { setCfg({accent:el.dataset.v}); save(); render(); },
@@ -1804,6 +1870,8 @@ function ctxComando(){
     compromissos:live("eventos").filter(e => e.data >= t && e.data <= addDays(t, 14)).map(e => ({t:e.t, data:e.data, hora:e.hora || ""})),
     comidaHoje:totaisDia(t), metasComida:S.cfg.metas,
     treinoHoje:treinosDoDia(t).map(x => x.nome),
+    analiseGastos:S.analise ? {resumo:S.analise.resumo, poupancaPossivel:S.analise.poupancaPossivel, pontos:(S.analise.pontos || []).map(p => p.titulo + ": " + p.detalhe)} : null,
+    pagamentosRepetidos:repetidos().slice(0, 10),
     poupanca:{total:totalPoupado(), esteMes:poupadoMes(ym(t)), objetivos:live("poupObj").map(o => ({nome:o.nome, guardado:saldoObj(o.id), alvo:+o.alvo || 0, ate:o.data || ""}))}, planoTreino:live("treinos").map(p => ({nome:p.nome, dias:(p.dias || []).map(d => DOW3[d])}))
   };
 }
