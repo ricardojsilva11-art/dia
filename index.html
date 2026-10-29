@@ -338,7 +338,7 @@ pre{white-space:pre-wrap; overflow-wrap:anywhere; background:var(--soft); paddin
 /* ============================================================
    dia. — núcleo: dados, datas, sincronização, horário
    ============================================================ */
-const APP_VERSION = "1.7 · 29/10/2026";
+const APP_VERSION = "1.8 · 29/10/2026";
 const KEY = "dia-app-v1";
 const VENC_KEY = "vencimento-app-v1";
 const COLS = ["tarefas","eventos","gastos","fixos","refeicoes","agua","treinos","sessoes","inbox","turnos","saude","poupObj","poupMov","poupAuto"];
@@ -1357,7 +1357,7 @@ function vPoup(){
     </div>
     <div class="side-col">
       <section class="card">
-        <div class="card-head"><h2>Poupança automática</h2><button class="btn sm" type="button" data-a="edit-auto" ${objs.length ? "" : "disabled"}>+ Nova</button></div>
+        <div class="card-head"><h2>Poupança automática</h2><button class="btn sm" type="button" data-a="edit-auto">+ Nova</button></div>
         <span class="xs muted">Um valor que passa sozinho para um objetivo, no mesmo dia de cada mês.</span>
         <div class="list">${autos.map(a => { const o = objs.find(x => x.id === a.obj); return `<div class="item"><div class="grow"><div class="t">${esc(o ? o.nome : "Objetivo apagado")}</div><div class="s">Dia ${esc(a.dia)} de cada mês</div></div><span class="amount">${eur(a.valor)}</span><button class="linkbtn" type="button" data-a="edit-auto" data-id="${a.id}">Editar</button><button class="x" type="button" data-a="del" data-col="poupAuto" data-id="${a.id}" aria-label="Apagar poupança automática">${ic("x", 16)}</button></div>`; }).join("") || '<div class="empty">Por exemplo: 100 € para as férias no dia 25.</div>'}</div>
       </section>
@@ -1500,6 +1500,7 @@ function dlgMov(objId, sinal = 1, valor){
 }
 function dlgAuto(a = {}){
   const objs = live("poupObj");
+  if (!objs.length){ toast("Primeiro cria o objetivo para onde vai o dinheiro (ex.: Férias)."); return dlgObj(); }
   openDlg(a.id ? "Editar poupança automática" : "Nova poupança automática", `<label class="field">Objetivo<select name="obj">${opt(objs.map(o => [o.id, o.nome]), a.obj || (objs[0] || {}).id)}</select></label>
     <div class="fields"><label class="field">Valor por mês (€)<input name="valor" inputmode="decimal" required value="${a.valor ? esc(num(a.valor, 2)) : ""}"></label><label class="field">Dia do mês<input name="dia" inputmode="numeric" required value="${esc(a.dia || 25)}"></label></div>
     <span class="xs muted">Dica: põe o dia a seguir ao dia em que recebes o vencimento.</span>`,
