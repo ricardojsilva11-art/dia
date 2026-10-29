@@ -405,7 +405,7 @@ pre{white-space:pre-wrap; overflow-wrap:anywhere; background:var(--soft); paddin
 /* ============================================================
    dia. — núcleo: dados, datas, sincronização, horário
    ============================================================ */
-const APP_VERSION = "3.0 · 29/10/2026";
+const APP_VERSION = "3.1 · 29/10/2026";
 const KEY = "dia-app-v1";
 const VENC_KEY = "vencimento-app-v1";
 const COLS = ["tarefas","eventos","gastos","fixos","refeicoes","agua","treinos","sessoes","inbox","turnos","saude","poupObj","poupMov","poupAuto","recorr","extras"];
@@ -698,6 +698,7 @@ function parseQuick(txt){
     data = `${yy}-${pad(+m)}-${pad(+d)}`; return " ";
   });
   t = t.replace(/\s(?:às |as )?(\d{1,2})(?:h|:)(\d{2})?\s/i, (_, h, m) => { if (+h < 24){ hora = `${pad(+h)}:${m || "00"}`; return " "; } return _; });
+  if (!hora) t = t.replace(/\s(?:às|as)\s(\d{1,2})\s/i, (_, h) => { if (+h < 24){ hora = `${pad(+h)}:00`; return " "; } return _; });
   return {t:t.trim().replace(/\s+/g, " "), data, hora, tag, prio};
 }
 
@@ -1900,7 +1901,7 @@ function vDef(){
 
     <section class="card">
       <div class="card-head"><h2>Voz</h2><span class="chip ${UI.ping && UI.ping.ia ? "c-ok" : "c-x"}">${UI.ping ? (UI.ping.ia ? "IA ligada" : "IA desligada") : "—"}</span></div>
-      <span class="small muted">Toca no microfone (em cima, ou no «+» do iPhone) e fala: «gastei 12 euros no almoço», «lembra-me de pagar a luz amanhã às 10», «bebi um copo de água», «que turno tenho amanhã?».</span>
+      <span class="small muted">Toca no microfone (em cima, ou no «+» do iPhone) e fala: «gastei 12 euros no almoço», «lembra-me de pagar a luz amanhã às 10», «lembra-me do lixo todas as terças», «que turno tenho amanhã?».</span>
       <label class="item" style="border:0;min-height:44px"><input class="check" type="checkbox" data-c="cfg-bool" data-k="falar" ${c.falar !== false ? "checked" : ""}> <span class="small" style="font-weight:700">Ler as respostas em voz alta</span></label>
       <span class="xs muted">${UI.ping ? `Servidor: IA ${UI.ping.ia ? "ligada (entende pedidos livres)" : "desligada (só comandos simples)"} · gravação de voz ${UI.ping.voz ? "ligada" : "desligada (liga «Workers AI» no servidor se o reconhecimento do navegador não funcionar)"}.` : (syncOn() ? "A verificar o servidor…" : "Sem servidor: só comandos simples, com o reconhecimento de voz do navegador.")}</span>
     </section>
@@ -2600,7 +2601,7 @@ function vozUI(){
     ${V.feitos.length ? `<div class="list" style="width:100%">${V.feitos.map(f => `<div class="item"><span class="chip c-ok">Feito</span><span class="grow small">${esc(f)}</span></div>`).join("")}</div>
       <button class="btn sm ghost" type="button" data-a="voz-desfazer">Desfazer</button>` : ""}
     <div class="voz-in"><label for="vozIn" class="sr">Escrever comando</label><input id="vozIn" class="input" placeholder="Ou escreve aqui o pedido…" autocomplete="off"><button class="btn sm" type="button" data-a="voz-enviar">Enviar</button></div>
-    <div class="xs muted">Exemplos: «gastei 12,50 no almoço» · «lembra-me de pagar o IUC sexta às 10h» · «bebi dois copos de água» · «almocei frango com arroz» · «que turno tenho amanhã?» · «quanto gastei este mês?»</div>`;
+    <div class="xs muted">Exemplos: «gastei 12,50 no almoço» · «lembra-me de pagar o IUC sexta às 10h» · «lembra-me do lixo todas as terças» · «que turno tenho amanhã?» · «quanto gastei este mês?»</div>`;
 }
 document.addEventListener("keydown", e => { if (e.target && e.target.id === "vozIn" && e.key === "Enter"){ e.preventDefault(); A["voz-enviar"](); } });
 
@@ -2662,7 +2663,6 @@ function ctxComando(){
     horario:Array.from({length:14}, (_, i) => { const k = addDays(t, i), s = shiftOf(k); return {data:k, dia:DOW3[pdk(k).getDay()], turno:s ? shiftLabel(s) : "sem horário", horas:isWork(s) ? S.cfg.horas[s].join("-") : "", feriado:isHoliday(k)}; }),
     tarefasPorFazer:live("tarefas").filter(x => !x.feito).slice(0, 60).map(x => ({id:x.id, t:x.t, data:x.data || "", hora:x.hora || ""})),
     compromissos:live("eventos").filter(e => e.data >= t && e.data <= addDays(t, 14)).map(e => ({t:e.t, data:e.data, hora:e.hora || ""})),
-    comidaHoje:totaisDia(t), metasComida:S.cfg.metas,
     treinoHoje:treinosDoDia(t).map(x => x.nome),
     dinheiroDoMes:(() => { const d = disponivelMes(); return d ? {vencimentoLiquido:d.liquido, gastosDoMes:d.gastos, poupadoDoMes:d.poupanca, aindaPodeGastar:d.disp} : null; })(),
     analiseGastos:S.analise ? {resumo:S.analise.resumo, poupancaPossivel:S.analise.poupancaPossivel, pontos:(S.analise.pontos || []).map(p => p.titulo + ": " + p.detalhe)} : null,
@@ -2674,6 +2674,8 @@ async function executarComando(texto){
   texto = String(texto || "").trim(); if (!texto) return;
   if (V.ouvindo){ try{ const r = V.rec; r.onend = r.onresult = r.onerror = null; r.abort(); }catch(e){} V.ouvindo = false; }
   V.texto = texto; V.erro = ""; V.estado = "A tratar do pedido…"; V.resposta = ""; V.feitos = []; V.undo = []; vozUI();
+  /* a comida saiu da app: a voz já não regista refeições nem água */
+  if (SEM_COMIDA.test(texto)){ V.estado = ""; V.resposta = "A comida já não faz parte da app, por isso não registei nada."; vozUI(); falar(V.resposta); return; }
   let out = null;
   if (syncOn()){
     try{ out = await api("/api/comando", {texto, ctx:ctxComando()}); }
@@ -2688,7 +2690,8 @@ async function executarComando(texto){
   save(); render();
 }
 /* aceita pequenas variações no formato das ações e corrige datas */
-const TIPO_ALIAS = {poupança:"poupanca", poupar:"poupanca", savings:"poupanca", deposito:"poupanca", "depósito":"poupanca", despesa:"gasto", expense:"gasto", compra:"gasto", pagamento:"gasto", task:"tarefa", lembrete:"tarefa", "refeição":"refeicao", comida:"refeicao", compromisso:"evento", event:"evento", "água":"agua", water:"agua"};
+const TIPO_ALIAS = {poupança:"poupanca", poupar:"poupanca", savings:"poupanca", deposito:"poupanca", "depósito":"poupanca", despesa:"gasto", expense:"gasto", compra:"gasto", pagamento:"gasto", task:"tarefa", lembrete:"tarefa", compromisso:"evento", event:"evento"};
+const SEM_COMIDA = /^\s*(?:comi|almocei|jantei|lanchei|bebi|tomei o pequeno-almo[cç]o|pequeno-almo[cç]o)\b/i;
 function normData(v){
   const t = today(), s = String(v || "").trim().toLowerCase();
   if (!s || s === "hoje" || s === "today") return t;
@@ -2717,18 +2720,13 @@ function normAcao(a){
 function aplicarAcoes(acoes){
   const t = today();
   (Array.isArray(acoes) ? acoes : []).map(normAcao).forEach(a => {
-    if (!a || !a.tipo) return;
+    if (!a || !a.tipo || ["refeicao","agua","comida"].includes(a.tipo)) return;
     if (a.tipo === "abrir"){ const sec = String(a.secao || ""); if (ROUTES.some(r => r[0] === sec) || sec === "definicoes"){ location.hash = "#" + sec; } return; }
     if (a.tipo === "concluir_tarefa"){
       const x = byId("tarefas", a.id); if (!x || x.feito) return;
       setTaskDone(a.id, true); V.feitos.push(`Tarefa concluída: ${x.t}`);
       V.undo.push(() => { const nx = (byId("tarefas", a.id) || {}).gerou; if (nx) remove("tarefas", nx); put("tarefas", {id:a.id, feito:false, gerou:null}); });
       return;
-    }
-    if (a.tipo === "agua"){
-      const o = byId("agua", t), antes = o && !o.del ? +o.l || 0 : 0, l = Math.max(0, r2(antes + pnum(a.l)));
-      put("agua", {id:t, l, del:false}); V.feitos.push(`Água: +${num(pnum(a.l) * 1000, 0)} ml (total ${num(l, 2)} L)`);
-      V.undo.push(() => put("agua", {id:t, l:antes})); return;
     }
     const r = applyItem(a, a.tipo === "gasto" ? "voz" : "ia");
     if (r){ V.feitos.push(itemTitle(a) + (itemSub(a) ? " · " + itemSub(a) : "")); V.undo.push(() => remove(r[0], r[1])); }
@@ -2758,21 +2756,14 @@ function comandoLocal(txt){
     const sinal = /retirei|tirei|levantei/i.test(m[1]) ? -1 : 1, v = pnum(m[2]), o = objPorNome(m[3]);
     return {resposta:`${sinal > 0 ? "Guardei" : "Retirei"} ${eur(v)} ${sinal > 0 ? "em" : "de"} ${o.nome}.`, acoes:[{tipo:"poupanca", valor:sinal * v, objetivo:o.nome}]};
   }
-  if ((m = /\bbebi\s+(\w+(?:[.,]\d+)?)?\s*(copos?|garrafas?|garrafinhas?|litros?|l|ml|mililitros?)?\s*(?:de\s+)?[áa]gua/i.exec(t))){
-    const n = nW(m[1]), u = (m[2] || "copo").toLowerCase();
-    const l = /^ml|^mili/.test(u) ? n / 1000 : /^l|^litro/.test(u) ? n : /garrafinha/.test(u) ? n * .33 : /garrafa/.test(u) ? n * .5 : n * .25;
-    return {resposta:`Somei ${num(l * 1000, 0)} mililitros de água.`, acoes:[{tipo:"agua", l}]};
-  }
-  if ((m = /^(?:lembra-me de|lembra-me|lembrar de|lembrar|tenho de|tenho que|preciso de|adiciona(?:r)?(?: a)? tarefa|nova tarefa|tarefa)\s*:?\s+(.+)$/i.exec(t))){
-    const p = parseQuick(m[1]); if (!p.t) return null;
+  if ((m = /^(?:lembra-me d[eoa]s?|lembra-me|lembrar d[eoa]s?|lembrar|tenho de|tenho que|preciso de|adiciona(?:r)?(?: a)? tarefa|nova tarefa|tarefa)\s*:?\s+(.+)$/i.exec(t))){
+    const pr = parseRep(m[1]), p = parseQuick(pr.txt); if (!p.t) return null;
+    if (pr.rep) return {resposta:`Tarefa criada: ${p.t}, ${repTexto(serieFields(p, pr.rep))}.`, acoes:[Object.assign({tipo:"tarefa", repete:pr.rep.freq, dias:pr.rep.dias || [], dia:pr.rep.dia || 0}, p)]};
     return {resposta:`Tarefa criada: ${p.t}${p.data ? ", " + relDate(p.data).toLowerCase() : ""}${p.hora ? " às " + p.hora : ""}.`, acoes:[Object.assign({tipo:"tarefa"}, p)]};
   }
   if ((m = /^(?:marca(?:r)?|agenda(?:r)?|novo compromisso|compromisso)\s*:?\s+(.+)$/i.exec(t))){
     const p = parseQuick(m[1]); if (!p.t) return null;
     return {resposta:`Marquei ${p.t} ${relDate(p.data || today()).toLowerCase()}${p.hora ? " às " + p.hora : ""}.`, acoes:[{tipo:"evento", t:cap(p.t), data:p.data || today(), hora:p.hora}]};
-  }
-  if ((m = /^(?:comi|almocei|jantei|lanchei|tomei o pequeno-almoço com|pequeno-almoço)\s*:?\s+(.+)$/i.exec(t))){
-    return {resposta:"Registei a refeição. Com a IA ligada também calculo as calorias.", acoes:[{tipo:"refeicao", desc:cap(m[1])}]};
   }
   if (/turno|hor[aá]rio|trabalho/i.test(t) && /amanh/i.test(t)){ const s = shiftOf(addDays(today(), 1)); return {resposta:`Amanhã: ${shiftLabel(s).toLowerCase()}${isWork(s) ? ", das " + S.cfg.horas[s].join(" às ") : ""}.`, acoes:[]}; }
   if (/turno|hor[aá]rio|trabalho/i.test(t) && /hoje/i.test(t)){ const s = shiftOf(today()); return {resposta:`Hoje: ${shiftLabel(s).toLowerCase()}${isWork(s) ? ", das " + S.cfg.horas[s].join(" às ") : ""}.`, acoes:[]}; }
