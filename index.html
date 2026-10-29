@@ -360,7 +360,7 @@ pre{white-space:pre-wrap; overflow-wrap:anywhere; background:var(--soft); paddin
   .day.tday{min-height:64px} .tcount b{min-width:18px; height:18px; padding:0 4px}
   .cal,.cal-head{gap:5px}
   .timeline{height:118px}
-  .bottomnav{display:grid; grid-template-columns:repeat(6,minmax(0,1fr)); position:fixed; left:12px; right:12px; bottom:calc(14px + env(safe-area-inset-bottom)); height:64px; border-radius:32px; background:#16161A; z-index:40; align-items:center; padding:0 6px; box-shadow:0 10px 30px rgba(0,0,0,.25)}
+  .bottomnav{display:grid; grid-template-columns:repeat(7,minmax(0,1fr)); position:fixed; left:12px; right:12px; bottom:calc(14px + env(safe-area-inset-bottom)); height:64px; border-radius:32px; background:#16161A; z-index:40; align-items:center; padding:0 6px; box-shadow:0 10px 30px rgba(0,0,0,.25)}
   :root[data-theme="dark"] .bottomnav{background:#26262E}
   .bottomnav a{justify-self:center; width:44px; height:44px; border-radius:22px; color:#BDBDC4; display:flex; align-items:center; justify-content:center}
   .bottomnav a[aria-current="page"]{background:var(--accent); color:#16161A}
@@ -377,6 +377,13 @@ pre{white-space:pre-wrap; overflow-wrap:anywhere; background:var(--soft); paddin
 .aviso{display:inline-flex; align-items:center; gap:8px; padding:10px 14px; border-radius:16px; background:var(--card); color:var(--ink); text-decoration:none; font-size:14px; border:1.5px solid var(--amber-ink); min-height:44px}
 .aviso svg{color:var(--amber-ink); flex-shrink:0}
 .aviso.red{border-color:var(--red)} .aviso.red svg{color:var(--red)}
+
+.credrow{display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:10px}
+.credrow .l{font-size:12px; font-weight:700; color:var(--muted)}
+.credrow .v{white-space:nowrap; font-size:19px; font-weight:800; letter-spacing:-.01em; font-variant-numeric:tabular-nums}
+.bar.big{height:12px}
+.lchart .xl{font-size:11px; fill:var(--muted)}
+@media (max-width:420px){ .credrow{gap:6px} .credrow .v{font-size:15px} }
 
 </style>
 </head>
@@ -405,10 +412,10 @@ pre{white-space:pre-wrap; overflow-wrap:anywhere; background:var(--soft); paddin
 /* ============================================================
    dia. — núcleo: dados, datas, sincronização, horário
    ============================================================ */
-const APP_VERSION = "3.1 · 29/10/2026";
+const APP_VERSION = "3.2 · 29/10/2026";
 const KEY = "dia-app-v1";
 const VENC_KEY = "vencimento-app-v1";
-const COLS = ["tarefas","eventos","gastos","fixos","refeicoes","agua","treinos","sessoes","inbox","turnos","saude","poupObj","poupMov","poupAuto","recorr","extras"];
+const COLS = ["tarefas","eventos","gastos","fixos","refeicoes","agua","treinos","sessoes","inbox","turnos","saude","poupObj","poupMov","poupAuto","recorr","extras","creditos","credMov"];
 const DOW = ["Domingo","Segunda","Terça","Quarta","Quinta","Sexta","Sábado"];
 const DOW3 = ["Dom","Seg","Ter","Qua","Qui","Sex","Sáb"];
 const MESES = ["janeiro","fevereiro","março","abril","maio","junho","julho","agosto","setembro","outubro","novembro","dezembro"];
@@ -1154,7 +1161,7 @@ function folhasExcel(){
       sets.forEach((v, j) => { if (v == null || v === "") return; tr.push([{d:s.data}, p.nome, e.n, j + 1, pnum(reps[j]) || reps[j] || "", +v, s.feito ? "Sim" : ""]); });
     });
   });
-  return [{nome:"Gastos", rows:g, widths:[12, 32, 18, 12, 14]}, {nome:"Gastos por mês", rows:gm, widths:[10, 20, 12, 12]}, {nome:"Treinos", rows:tr, widths:[12, 24, 26, 7, 11, 8, 11]}];
+  return [{nome:"Gastos", rows:g, widths:[12, 32, 18, 12, 14]}, {nome:"Gastos por mês", rows:gm, widths:[10, 20, 12, 12]}, {nome:"Treinos", rows:tr, widths:[12, 24, 26, 7, 11, 8, 11]}, credFolha()].filter(Boolean);
 }
 function exportarExcel(){
   const blob = xlsxBlob(folhasExcel());
@@ -1191,10 +1198,11 @@ const IC = {
   bell:'<path d="M6 16V11a6 6 0 0 1 12 0v5l1.5 2h-15z"/><path d="M10 20.5a2 2 0 0 0 4 0"/>',
   download:'<path d="M12 4v11M7 10l5 5 5-5"/><path d="M4 17v2a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-2"/>',
   repeat:'<path d="M4 11V9a3 3 0 0 1 3-3h12M16 3l3 3-3 3"/><path d="M20 13v2a3 3 0 0 1-3 3H5M8 21l-3-3 3-3"/>',
+  creditos:'<path d="M3 10l9-6 9 6"/><path d="M5 10v8M9.5 10v8M14.5 10v8M19 10v8M3 20h18"/>',
   cal:'<rect x="3" y="4" width="18" height="17" rx="2"/><path d="M3 9h18M8 2v4M16 2v4M8 14h3"/>'
 };
 const ic = (n, s = 20, sw = 2) => `<svg width="${s}" height="${s}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="${sw}" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${IC[n]}</svg>`;
-const ROUTES = [["hoje","Hoje"],["tarefas","Tarefas"],["horario","Horário"],["treino","Treino"],["gastos","Gastos"],["poupanca","Poupança"]];
+const ROUTES = [["hoje","Hoje"],["tarefas","Tarefas"],["horario","Horário"],["treino","Treino"],["gastos","Gastos"],["poupanca","Poupança"],["creditos","Créditos"]];
 const UI = { tarefasFiltro:"dia", horMes:null, gasMes:null, comDia:null, treinoSel:{}, exSel:null, ai:{} };
 const route = () => { const r = (location.hash || "#hoje").slice(1).split("?")[0]; return ROUTES.some(x => x[0] === r) || r === "definicoes" ? r : "hoje"; };
 
@@ -1225,7 +1233,7 @@ function render(){
   pendingRender = false;
   applyTheme(); renderNav(); refreshSyncUI();
   const r = route();
-  const v = {hoje:vHoje, tarefas:vTarefas, horario:vHorario, treino:vTreino, comida:vComida, gastos:vGastos, poupanca:vPoup, definicoes:vDef}[r];
+  const v = {hoje:vHoje, tarefas:vTarefas, horario:vHorario, treino:vTreino, comida:vComida, gastos:vGastos, poupanca:vPoup, creditos:vCreditos, definicoes:vDef}[r];
   $("#view").innerHTML = (r === "definicoes" ? "" : dayBar(diaSel())) + v();
   document.title = r === "hoje" ? "dia." : `${(ROUTES.find(x => x[0] === r) || [0, "Definições"])[1]} · dia.`;
 }
@@ -2560,6 +2568,7 @@ function boot(){
   ch = ensureRecorr() || ch;
   ch = applyFixos() || ch;
   ch = applyPoupAuto() || ch;
+  ch = applyCredAuto() || ch;
   if (ch) save();
   render();
   copiaLocal();
@@ -2567,13 +2576,204 @@ function boot(){
   window.addEventListener("hashchange", () => { if (/\?resumo/.test(location.hash)){ dlgResumo(); try{ history.replaceState(null, "", "#hoje"); }catch(e){} } render(); window.scrollTo(0, 0); });
   if ("serviceWorker" in navigator) navigator.serviceWorker.addEventListener("message", e => { if (e.data && e.data.abrir){ location.hash = e.data.abrir; } });
   matchMedia("(prefers-color-scheme: dark)").addEventListener("change", applyTheme);
-  document.addEventListener("visibilitychange", () => { if (document.visibilityState === "visible"){ if (readVencLocal() | ensureRecorr() | applyFixos() | applyPoupAuto()) save(); syncNow(); softRender(); } });
+  document.addEventListener("visibilitychange", () => { if (document.visibilityState === "visible"){ if (readVencLocal() | ensureRecorr() | applyFixos() | applyPoupAuto() | applyCredAuto()) save(); syncNow(); softRender(); } });
   setInterval(() => { if (document.visibilityState === "visible") syncNow(); }, 20000);
   setInterval(() => { if (document.visibilityState === "visible" && route() === "hoje") softRender(); }, 60000);
   syncNow();
   if ("serviceWorker" in navigator && location.protocol === "https:" && !/claude|claudeusercontent/.test(location.hostname)) navigator.serviceWorker.register("sw.js").catch(() => {});
 }
 boot();
+
+/* ============================================================
+   dia. — CRÉDITOS: valor total, valor já abatido, % e evolução
+   ============================================================ */
+function eurC(v){ return Math.abs(v) >= 10000 ? eur0(v) : eur(v); }
+function credMovs(id){ return live("credMov").filter(m => m.cred === id).sort((a, b) => a.data.localeCompare(b.data) || (a.upd || 0) - (b.upd || 0)); }
+function credAbatido(c){ return r2((+c.abatidoIni || 0) + credMovs(c.id).reduce((a, m) => a + (+m.valor || 0), 0)); }
+function credInfo(c){
+  const total = +c.total || 0, ab = Math.min(total, credAbatido(c)), div = r2(Math.max(0, total - ab));
+  const r = (+c.taxa || 0) / 1200, P = +c.prestacao || 0;
+  /* meses que faltam (com juros se a TAN estiver preenchida) */
+  let meses = null;
+  if (div <= 0) meses = 0;
+  else if (P > 0){ if (r > 0){ meses = P > div * r ? Math.ceil(-Math.log(1 - r * div / P) / Math.log(1 + r)) : null; } else meses = Math.ceil(div / P); }
+  let fim = null;
+  if (meses != null){ const d = pdk(today()); d.setDate(1); d.setMonth(d.getMonth() + meses); fim = d; }
+  return {total, ab, div, pct:total ? ab / total : 0, meses, fim, juros:r2(div * r)};
+}
+/* prestações automáticas: em cada mês, no dia indicado, abate o capital da prestação */
+function applyCredAuto(){
+  const t = today(); let ch = false;
+  live("creditos").filter(c => c.auto && +c.prestacao > 0).forEach(c => {
+    const ini = c.desde || t;
+    let k = `${ym(ini)}-01`;
+    for (let i = 0; i < 24 && ym(k) <= ym(t); i++, k = addDays(`${ym(k)}-01`, 32).slice(0, 7) + "-01"){
+      const m = ym(k), dia = `${m}-${pad(Math.min(+c.dia || 1, diasNoMes(m)))}`;
+      if (dia < ini || dia > t) continue;
+      const id = `cr-${c.id}-${m}`;
+      if (S.credMov.some(x => x.id === id)) continue;
+      const info = credInfo(c); if (info.div <= 0) break;
+      const juros = r2(info.div * (+c.taxa || 0) / 1200), cap = r2(Math.min(info.div, Math.max(0, +c.prestacao - juros)));
+      put("credMov", {id, cred:c.id, data:dia, valor:cap, nota:juros ? `Prestação ${eur(c.prestacao)} (juros ${eur(juros)})` : `Prestação ${eur(c.prestacao)}`, origem:"auto"});
+      ch = true;
+    }
+  });
+  return ch;
+}
+/* série do valor abatido ao longo do tempo (um ponto por movimento) */
+function credSerie(c){
+  const pts = [], total = +c.total || 0; let ab = +c.abatidoIni || 0;
+  const ms = credMovs(c.id);
+  let d0 = c.desde || today(); if (ms[0] && ms[0].data < d0) d0 = ms[0].data;
+  pts.push({d:d0, ab});
+  ms.forEach(m => { ab += +m.valor || 0; const last = pts[pts.length - 1]; const p = {d:m.data, ab:Math.min(total, ab)}; if (last.d === m.data) pts[pts.length - 1] = p; else pts.push(p); });
+  if (pts[pts.length - 1].d < today()) pts.push({d:today(), ab:pts[pts.length - 1].ab});
+  return pts.map(p => ({d:p.d, ab:r2(p.ab), div:r2(Math.max(0, total - p.ab)), pct:total ? Math.min(100, p.ab / total * 100) : 0}));
+}
+
+/* gráfico de linhas: % abatido ou € em dívida de cada crédito */
+function credChart(cs){
+  const modo = UI.credModo === "eur" ? "eur" : "pct";
+  const series = cs.map((c, i) => ({c, cor:`var(--s${(i % 8) + 1})`, pts:credSerie(c)}));
+  const allD = series.flatMap(s => s.pts.map(p => p.d)).sort();
+  if (!allD.length) return "";
+  const projecao = series.map(s => { const inf = credInfo(s.c); return inf.fim && inf.meses > 0 && inf.meses <= 600 ? {d:dk(inf.fim), v:modo === "pct" ? 100 : 0} : null; });
+  let d0 = allD[0], d1 = allD[allD.length - 1];
+  if (UI.credProj === true) projecao.forEach(p => { if (p && p.d > d1) d1 = p.d; });
+  if (d0 === d1) d0 = addDays(d1, -30);
+  const x0 = pdk(d0).getTime(), x1 = pdk(d1).getTime();
+  const val = p => modo === "pct" ? p.pct : p.div;
+  let hi = modo === "pct" ? 100 : Math.max(1, ...series.flatMap(s => s.pts.map(val)));
+  const step = modo === "pct" ? 25 : [100, 250, 500, 1000, 2500, 5000, 10000, 25000, 50000, 100000].find(x => hi / x <= 5) || 250000;
+  hi = Math.ceil(hi / step) * step;
+  const W = Math.round(Math.max(300, window.innerWidth < 761 ? window.innerWidth - 70 : Math.min(1180, window.innerWidth - 130))), H = window.innerWidth < 761 ? 240 : 300;
+  const L = modo === "pct" ? 44 : 62, R = cs.length <= 4 && W > 420 ? 110 : 14, T = 12, B = 26, pw = W - L - R, ph = H - T - B;
+  const X = d => L + (pdk(d).getTime() - x0) / (x1 - x0 || 1) * pw, Y = v => T + ph - v / hi * ph;
+  const ticks = []; for (let v = 0; v <= hi + 1e-9; v += step) ticks.push(v);
+  const fmt = v => modo === "pct" ? `${v} %` : v >= 1000 ? `${num(v / 1000, 1)} mil €` : `${num(v, 0)} €`;
+  /* marcas no eixo x: início, fim e alguns meses pelo meio */
+  const nx = Math.min(5, Math.max(2, Math.round(pw / 120)));
+  const xt = Array.from({length:nx}, (_, i) => dk(new Date(x0 + (x1 - x0) * i / (nx - 1))));
+  const mLab = d => `${MESES[pdk(d).getMonth()].slice(0, 3)} ${String(pdk(d).getFullYear()).slice(2)}`;
+  const ends = series.map((s, i) => ({s, y:Y(val(s.pts[s.pts.length - 1])), i})).sort((a, b) => a.y - b.y);
+  for (let i = 1; i < ends.length; i++) if (ends[i].y - ends[i - 1].y < 13) ends[i].y = ends[i - 1].y + 13;
+  const svg = `<svg class="lchart" viewBox="0 0 ${W} ${H}" width="${W}" height="${H}" role="img" aria-label="Evolução dos créditos">
+    <g class="grid">${ticks.map(v => `<line x1="${L}" x2="${L + pw}" y1="${Y(v)}" y2="${Y(v)}"/><text x="${L - 6}" y="${Y(v) + 4}" text-anchor="end">${fmt(v)}</text>`).join("")}</g>
+    ${xt.map((d, i) => `<text x="${X(d)}" y="${H - 6}" text-anchor="${i === 0 ? "start" : i === xt.length - 1 ? "end" : "middle"}" class="xl">${mLab(d)}</text>`).join("")}
+    ${(() => { const tx = X(today()); return tx > L + 2 && tx < L + pw - 2 ? `<line x1="${tx}" x2="${tx}" y1="${T}" y2="${T + ph}" stroke="var(--muted)" stroke-dasharray="2 3" opacity=".6"/><text x="${tx - 4}" y="${T + ph - 6}" text-anchor="end" class="xl">hoje</text>` : ""; })()}
+    ${series.map((s, i) => { const last = s.pts[s.pts.length - 1], pj = projecao[i];
+      return `<polyline fill="none" stroke="${s.cor}" stroke-width="2.2" stroke-linejoin="round" stroke-linecap="round" points="${s.pts.map(p => `${X(p.d).toFixed(1)},${Y(val(p)).toFixed(1)}`).join(" ")}"/>
+      ${UI.credProj === true && pj ? `<line x1="${X(last.d)}" y1="${Y(val(last))}" x2="${X(pj.d)}" y2="${Y(pj.v)}" stroke="${s.cor}" stroke-width="1.6" stroke-dasharray="5 5" opacity=".7"/>` : ""}
+      ${s.pts.map(p => `<circle class="hit" cx="${X(p.d)}" cy="${Y(val(p))}" r="11"><title>${esc(s.c.nome)} · ${shortDate(p.d)}: ${eur(p.ab)} abatido (${num(p.pct, 1)} %) · em dívida ${eur(p.div)}</title></circle>`).join("")}
+      <circle cx="${X(last.d)}" cy="${Y(val(last))}" r="4.5" fill="${s.cor}" pointer-events="none"/>`; }).join("")}
+    ${R > 20 ? ends.map(e => `<text class="lbl" x="${L + pw + 8}" y="${e.y + 4}">${esc(e.s.c.nome.length > 14 ? e.s.c.nome.slice(0, 13) + "…" : e.s.c.nome)}</text>`).join("") : ""}
+  </svg>`;
+  return `<div style="display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap">
+      <div class="lgd">${series.map(s => `<span><i style="background:${s.cor}"></i>${esc(s.c.nome)}</span>`).join("")}</div>
+      <div class="seg" role="group" aria-label="Mostrar"><button type="button" data-a="cred-modo" data-v="pct" aria-pressed="${modo === "pct"}">% abatido</button><button type="button" data-a="cred-modo" data-v="eur" aria-pressed="${modo === "eur"}">€ em dívida</button></div>
+    </div>
+    <div style="overflow-x:auto">${svg}</div>
+    <div class="xs muted">${UI.credProj === true ? "A tracejado: previsão até ficar pago, com a prestação atual. " : ""}Passa o rato (ou toca) num ponto para ver os valores. <button class="linkbtn xs" type="button" data-a="cred-proj">${UI.credProj === true ? "Esconder previsão" : "Mostrar previsão"}</button></div>`;
+}
+
+function vCreditos(){
+  const cs = live("creditos").sort((a, b) => (a.ordem || 0) - (b.ordem || 0) || (b.total || 0) - (a.total || 0));
+  const inf = cs.map(credInfo);
+  const tot = inf.reduce((a, x) => a + x.total, 0), ab = inf.reduce((a, x) => a + x.ab, 0), div = inf.reduce((a, x) => a + x.div, 0);
+  const prest = cs.filter((c, i) => inf[i].div > 0).reduce((a, c) => a + (+c.prestacao || 0), 0);
+  const pct = tot ? ab / tot : 0;
+  const card = (c, i) => {
+    const x = inf[i], ms = credMovs(c.id).slice(-4).reverse();
+    return `<section class="card cred">
+      <div class="card-head"><div><h2>${esc(c.nome)}</h2><span class="xs muted">${[c.banco, +c.taxa ? `TAN ${num(c.taxa, 2)} %` : "", +c.prestacao ? `prestação ${eur(c.prestacao)}${c.dia ? ", dia " + c.dia : ""}` : ""].filter(Boolean).map(esc).join(" · ") || "&nbsp;"}</span></div>
+        <span class="chip ${x.div <= 0 ? "c-ok" : "c-x"}">${x.div <= 0 ? "Pago" : Math.round(x.pct * 100) + " %"}</span></div>
+      <div class="credrow">
+        <div><div class="l">Valor total</div><div class="v">${eurC(x.total)}</div></div>
+        <div><div class="l">Já abatido</div><div class="v" style="color:var(--green)">${eurC(x.ab)}</div></div>
+        <div><div class="l">Em dívida</div><div class="v">${eurC(x.div)}</div></div>
+      </div>
+      <div class="bar big" role="progressbar" aria-valuenow="${Math.round(x.pct * 100)}" aria-valuemin="0" aria-valuemax="100" aria-label="Percentagem abatida"><i style="width:${(x.pct * 100).toFixed(1)}%;background:var(--s${(i % 8) + 1})"></i></div>
+      <div class="small" style="display:flex;justify-content:space-between;gap:8px;flex-wrap:wrap"><b>${num(x.pct * 100, 1)} % abatido</b><span class="muted">${x.div <= 0 ? "Crédito liquidado" : x.fim ? `Fica pago em ${MESES[x.fim.getMonth()]} de ${x.fim.getFullYear()} (${x.meses} prestaç${x.meses === 1 ? "ão" : "ões"})` : +c.prestacao ? "A prestação não chega para pagar os juros" : "Indica a prestação para veres quando fica pago"}</span></div>
+      ${ms.length ? `<div class="list">${ms.map(m => `<div class="item"><div class="grow"><div class="t">${eur(m.valor)}</div><div class="s">${shortDate(m.data)}${m.nota ? " · " + esc(m.nota) : ""}${m.origem === "auto" ? " · automático" : ""}</div></div><button class="x" type="button" data-a="del" data-col="credMov" data-id="${m.id}" aria-label="Apagar movimento">${ic("x", 16)}</button></div>`).join("")}</div>` : ""}
+      <div style="display:flex;gap:8px;flex-wrap:wrap">
+        <button class="btn sm" type="button" data-a="cred-pag" data-id="${c.id}">+ Pagamento</button>
+        <button class="btn sm ghost" type="button" data-a="cred-saldo" data-id="${c.id}">Atualizar valor em dívida</button>
+        <button class="linkbtn" type="button" data-a="cred-edit" data-id="${c.id}">Editar</button>
+      </div>
+    </section>`;
+  };
+  return `
+  <div class="page-head"><div><p>${cs.length ? `${cs.length} crédito${cs.length === 1 ? "" : "s"}${prest ? ` · ${eur(prest)} de prestações por mês` : ""}` : "Empréstimos, crédito habitação, carro, cartões"}</p><h1>Créditos</h1></div>
+    <button class="btn" type="button" data-a="cred-edit">+ Novo crédito</button></div>
+  ${cs.length ? `
+  <div class="kpis">
+    <div class="kpi inv"><div class="l">Total dos créditos</div><div class="v">${eur0(tot)}</div></div>
+    <div class="kpi"><div class="l">Já abatido</div><div class="v" style="color:var(--green)">${eur0(ab)}</div><div class="xs muted">${num(pct * 100, 1)} % do total</div></div>
+    <div class="kpi"><div class="l">Em dívida</div><div class="v">${eur0(div)}</div></div>
+    <div class="kpi"><div class="l">Prestações por mês</div><div class="v">${eur(prest)}</div></div>
+  </div>
+  <section class="card"><div class="card-head"><h2>Evolução</h2><span class="xs muted">${num(pct * 100, 1)} % de tudo já abatido</span></div>${credChart(cs)}</section>
+  <div class="grid g2">${cs.map(card).join("")}</div>
+  <p class="xs muted" style="margin:0">«Já abatido» é o capital que já pagaste. Com a prestação automática ligada, a app abate todos os meses a prestação menos os juros (se indicares a TAN). Para acertar com o banco, usa «Atualizar valor em dívida».</p>`
+  : `<section class="card acc"><h2>Regista os teus créditos</h2><span class="small">Para cada crédito indica o valor total e quanto já está pago. A app mostra a percentagem abatida, quando fica pago e a evolução num gráfico.</span><div><button class="btn" type="button" data-a="cred-edit" style="background:#16161A;color:#fff">+ Novo crédito</button></div></section>`}`;
+}
+
+/* ---------- diálogos ---------- */
+function dlgCredito(c = {}){
+  openDlg(c.id ? "Editar crédito" : "Novo crédito", `<label class="field">Nome<input name="nome" required value="${esc(c.nome || "")}" placeholder="Ex.: Crédito habitação, Carro"></label>
+    <div class="fields"><label class="field">Valor total do crédito (€)<input name="total" inputmode="decimal" required value="${c.total ? esc(num(c.total, 2)) : ""}" placeholder="Ex.: 150000"></label>
+    <label class="field">Valor já abatido (€)<input name="abatido" inputmode="decimal" value="${c.id ? esc(num(credAbatido(c), 2)) : ""}" placeholder="Ex.: 32000"></label></div>
+    <div class="fields"><label class="field">Prestação mensal (€)<input name="prestacao" inputmode="decimal" value="${+c.prestacao ? esc(num(c.prestacao, 2)) : ""}" placeholder="Opcional"></label>
+    <label class="field">Dia da prestação<input name="dia" inputmode="numeric" value="${esc(c.dia || "")}" placeholder="Ex.: 5"></label>
+    <label class="field">TAN (%)<input name="taxa" inputmode="decimal" value="${+c.taxa ? esc(num(c.taxa, 3)) : ""}" placeholder="Opcional"></label></div>
+    <label class="field">Banco ou nota (opcional)<input name="banco" value="${esc(c.banco || "")}"></label>
+    <label class="item" style="border:0;min-height:40px"><input class="check" type="checkbox" name="auto" value="1" ${c.auto ? "checked" : ""}> <span class="small" style="font-weight:700">Abater a prestação sozinho todos os meses</span></label>
+    <span class="xs muted">Com a TAN preenchida, a app separa juros e capital em cada prestação e calcula quando o crédito fica pago.</span>`,
+  o => {
+    const total = pnum(o.total); if (!total) throw new Error("Indica o valor total do crédito.");
+    const abat = Math.min(total, pnum(o.abatido));
+    const base = {id:c.id, nome:o.nome.trim(), total, prestacao:pnum(o.prestacao), dia:Math.min(31, Math.max(0, Math.round(pnum(o.dia)))), taxa:pnum(o.taxa), banco:o.banco.trim(), auto:!!o.auto};
+    if (!c.id){ base.desde = today(); base.abatidoIni = abat; put("creditos", base); }
+    else {
+      /* se mudaste o «já abatido», regista a diferença como acerto (fica no gráfico) */
+      const atual = credAbatido(c), dif = r2(abat - atual);
+      put("creditos", base);
+      if (Math.abs(dif) >= .01) put("credMov", {cred:c.id, data:today(), valor:dif, nota:"Acerto do valor abatido", origem:"acerto"});
+    }
+    applyCredAuto(); save(); render(); toast("Crédito guardado.");
+  }, "Guardar", c.id ? `<button class="btn danger" type="button" data-a="cred-del" data-id="${c.id}" style="margin-right:auto">Apagar</button>` : "");
+}
+function dlgCredPag(c){
+  const x = credInfo(c), juros = r2(x.div * (+c.taxa || 0) / 1200), sug = +c.prestacao ? r2(Math.max(0, +c.prestacao - juros)) : "";
+  openDlg(`Pagamento · ${c.nome}`, `<div class="fields"><label class="field">Valor abatido ao capital (€)<input name="valor" inputmode="decimal" required value="${sug ? esc(num(sug, 2)) : ""}"></label><label class="field">Data<input type="date" name="data" required value="${esc(diaSel())}"></label></div>
+    <label class="field">Nota (opcional)<input name="nota" placeholder="Ex.: amortização antecipada"></label>
+    <span class="xs muted">${sug ? `Sugestão: prestação ${eur(c.prestacao)}${juros ? ` menos ${eur(juros)} de juros` : ""}. ` : ""}Em dívida: ${eur(x.div)}.</span>`,
+  o => { const v = pnum(o.valor); if (!v) throw new Error("Indica o valor."); put("credMov", {cred:c.id, data:o.data, valor:Math.min(v, x.div || v), nota:o.nota.trim(), origem:"manual"}); save(); render(); toast("Pagamento registado."); });
+}
+function dlgCredSaldo(c){
+  const x = credInfo(c);
+  openDlg(`Valor em dívida · ${c.nome}`, `<span class="small muted">Escreve o capital em dívida que aparece no banco. A app regista a diferença como valor abatido.</span>
+    <div class="fields"><label class="field">Em dívida hoje (€)<input name="div" inputmode="decimal" required value="${esc(num(x.div, 2))}"></label><label class="field">Data<input type="date" name="data" value="${esc(today())}"></label></div>`,
+  o => { const novo = Math.max(0, pnum(o.div)), dif = r2(x.div - novo); if (Math.abs(dif) < .01) return; put("credMov", {cred:c.id, data:o.data || today(), valor:dif, nota:"Atualizado com o valor do banco", origem:"acerto"}); save(); render(); toast(`Atualizado: ${eur(novo)} em dívida.`); });
+}
+/* folha de Excel com os créditos */
+function credFolha(){
+  const cs = live("creditos"); if (!cs.length) return null;
+  const rows = [["Crédito","Valor total","Já abatido","Em dívida","% abatido","Prestação","TAN %","Fica pago em"]];
+  cs.forEach(c => { const x = credInfo(c); rows.push([c.nome, {e:x.total}, {e:x.ab}, {e:x.div}, Math.round(x.pct * 1000) / 10, +c.prestacao ? {e:+c.prestacao} : "", +c.taxa || "", x.fim ? `${MESES[x.fim.getMonth()]} ${x.fim.getFullYear()}` : ""]); });
+  rows.push([], ["Data","Crédito","Valor abatido","Nota"]);
+  live("credMov").slice().sort((a, b) => a.data.localeCompare(b.data)).forEach(m => { const c = byId("creditos", m.cred); if (c && !c.del) rows.push([{d:m.data}, c.nome, {e:+m.valor || 0}, m.nota || ""]); });
+  return {nome:"Créditos", rows, widths:[24, 14, 14, 14, 11, 12, 8, 16]};
+}
+
+Object.assign(A, {
+  "cred-edit": el => dlgCredito(el.dataset.id ? byId("creditos", el.dataset.id) : {}),
+  "cred-pag": el => dlgCredPag(byId("creditos", el.dataset.id)),
+  "cred-saldo": el => dlgCredSaldo(byId("creditos", el.dataset.id)),
+  "cred-modo": el => { UI.credModo = el.dataset.v; render(); },
+  "cred-proj": () => { UI.credProj = UI.credProj !== true; render(); },
+  "cred-del": el => { const id = el.dataset.id; $("#dlg").close("cancel"); setTimeout(() => openDlg("Apagar este crédito?", '<span class="small">Apaga o crédito e todos os pagamentos registados.</span>', () => { remove("creditos", id); live("credMov").filter(m => m.cred === id).forEach(m => remove("credMov", m.id)); save(); render(); toast("Crédito apagado."); }, "Apagar"), 50); }
+});
 
 /* ============================================================
    dia. — comando por voz e ligação Google
