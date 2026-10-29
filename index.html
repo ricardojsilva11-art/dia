@@ -226,6 +226,18 @@ th{text-align:left; font-size:12px; font-weight:700; color:var(--muted); padding
 td{padding:9px 6px; border-top:1px solid var(--line)}
 td input.input{height:38px; width:84px}
 
+/* séries do treino */
+.exlist{display:flex; flex-direction:column}
+.ex{padding:12px 0; border-bottom:1px solid var(--line); display:flex; flex-direction:column; gap:10px}
+.ex:last-child{border-bottom:0}
+.ex-head{display:flex; align-items:flex-start; gap:12px}
+.ex-head b{font-size:15px}
+.ex-ok .ex-head b{color:var(--green)}
+.sets{display:flex; flex-wrap:wrap; gap:8px; align-items:flex-end}
+.set{display:flex; flex-direction:column; gap:4px; font-size:11px; font-weight:700; color:var(--muted)}
+.set .input{width:76px; height:44px; text-align:center; font-weight:700}
+.inv .set .input{background:var(--bg)}
+
 /* categorias */
 .catrow{display:grid; grid-template-columns:minmax(110px,150px) minmax(0,1fr) auto; gap:10px 14px; align-items:center; font-size:13px}
 .catrow .bar{height:10px}
@@ -307,6 +319,7 @@ pre{white-space:pre-wrap; overflow-wrap:anywhere; background:var(--soft); paddin
   .fab{display:flex; position:fixed; right:18px; bottom:calc(92px + env(safe-area-inset-bottom)); width:58px; height:58px; border-radius:20px; border:0; background:var(--accent); color:#16161A; z-index:41; align-items:center; justify-content:center; box-shadow:0 10px 24px rgba(0,0,0,.25)}
   .catrow{grid-template-columns:minmax(90px,120px) minmax(0,1fr) auto}
   .hide-m{display:none}
+  .set .input{width:62px}
 }
 @media (min-width:761px){ .show-m{display:none} }
 @media (prefers-reduced-motion:reduce){ *{animation:none!important; transition:none!important} }
@@ -338,7 +351,7 @@ pre{white-space:pre-wrap; overflow-wrap:anywhere; background:var(--soft); paddin
 /* ============================================================
    dia. — núcleo: dados, datas, sincronização, horário
    ============================================================ */
-const APP_VERSION = "2.0 · 29/10/2026";
+const APP_VERSION = "2.1 · 29/10/2026";
 const KEY = "dia-app-v1";
 const VENC_KEY = "vencimento-app-v1";
 const COLS = ["tarefas","eventos","gastos","fixos","refeicoes","agua","treinos","sessoes","inbox","turnos","saude","poupObj","poupMov","poupAuto"];
@@ -722,6 +735,19 @@ function totaisDia(k){
 }
 const treinosDoDia = k => live("treinos").filter(t => (t.dias || []).includes(pdk(k).getDay()));
 const sessao = (k, tid) => S.sessoes.find(s => s.id === `${k}|${tid}` && !s.del);
+/* repetições por série: "12/12/8/8" → [12,12,8,8]; "10" com 3 séries → [10,10,10] */
+function repsSeries(e){
+  const parts = String(e.r || "").split(/[\/,;]+/).map(x => x.trim()).filter(Boolean);
+  const n = Math.max(+e.s || 0, parts.length, 1);
+  return Array.from({length:n}, (_, j) => parts[j] || parts[parts.length - 1] || "");
+}
+/* cargas da última sessão anterior, série a série */
+function ultimasSeries(tid, i, antesDe){
+  const ses = live("sessoes").filter(s => s.treinoId === tid && s.data < antesDe && ((s.sets && s.sets[i] && s.sets[i].some(v => v != null && v !== "")) || (s.kg && s.kg[i] != null && s.kg[i] !== ""))).sort((a, b) => b.data.localeCompare(a.data));
+  if (!ses.length) return null;
+  const x = ses[0];
+  return {data:x.data, sets:x.sets && x.sets[i] ? x.sets[i] : null, kg:x.kg ? x.kg[i] : null};
+}
 function ultimaCarga(tid, i, antesDe){
   const ses = live("sessoes").filter(s => s.treinoId === tid && s.data < antesDe && s.kg && s.kg[i] != null && s.kg[i] !== "").sort((a, b) => b.data.localeCompare(a.data));
   return ses.length ? ses[0].kg[i] : null;
@@ -1109,7 +1135,8 @@ function vTreino(){
   const week = Array.from({length:7}, (_, i) => addDays(monday, i)).map(k => {
     const s = shiftOf(k), trs = treinosDoDia(k), done = trs.length && trs.every(x => (sessao(k, x.id) || {}).feito);
     return `<div class="wd ${k === t ? "today" : ""}"><span class="xs">${DOW3[pdk(k).getDay()]} · <span class="chip ${chipCls(s)}" style="padding:1px 6px">${chipTxt(s)}</span></span>
-      <b class="small">${trs.length ? esc(trs.map(x => x.nome).join(" + ")) : "Descanso"}${done ? " ✓" : ""}</b>
+      <b class="small hide-m">${trs.length ? esc(trs.map(x => x.nome).join(" + ")) : "Descanso"}${done ? " ✓" : ""}</b>
+      <span class="show-m">${trs.length ? `<span class="chip ${done ? "c-ok" : "c-ia"}" style="padding:1px 6px" title="${esc(trs.map(x => x.nome).join(" + "))}">${done ? "✓" : "T"}</span>` : '<span class="xs muted">—</span>'}</span>
       <span class="xs hide-m">${trs.length ? (s === "N" ? "Noite: leve ou descanso" : esc(trs[0].hora || S.cfg.treinoHora)) : ""}</span></div>`;
   }).join("");
   const hojeTr = treinosDoDia(t);
@@ -1118,11 +1145,16 @@ function vTreino(){
   let sessHtml = '<div class="empty">Cria um treino para começares a registar.</div>';
   if (sel){
     const ses = sessao(t, sel.id) || {kg:{}, ok:{}};
-    sessHtml = `<div class="tablewrap"><table><thead><tr><th>Exercício</th><th>Séries × reps</th><th class="hide-m">Última vez</th><th>Hoje (kg)</th><th>Feito</th></tr></thead><tbody>
-      ${(sel.ex || []).map((e, i) => { const last = ultimaCarga(sel.id, i, t); return `<tr><td><b>${esc(e.n)}</b></td><td>${esc(e.s)} × ${esc(e.r)}</td><td class="muted hide-m">${last != null ? num(last) + " kg" : "—"}</td>
-        <td><input class="input" inputmode="decimal" aria-label="Carga ${esc(e.n)}" data-c="kg" data-tid="${sel.id}" data-i="${i}" value="${ses.kg && ses.kg[i] != null ? esc(ses.kg[i]) : ""}" placeholder="${last != null ? esc(num(last)) : ""}"></td>
-        <td><input class="check" type="checkbox" aria-label="Feito ${esc(e.n)}" data-c="exok" data-tid="${sel.id}" data-i="${i}" ${ses.ok && ses.ok[i] ? "checked" : ""}></td></tr>`; }).join("")}
-      </tbody></table></div>
+    sessHtml = `<div class="exlist">${(sel.ex || []).map((e, i) => {
+        const reps = repsSeries(e), last = ultimasSeries(sel.id, i, t), cur = (ses.sets && ses.sets[i]) || [];
+        const lastTxt = last ? (last.sets ? last.sets.map(v => v == null || v === "" ? "—" : num(v)).join(" · ") : num(last.kg)) + " kg" : "";
+        return `<div class="ex ${ses.ok && ses.ok[i] ? "ex-ok" : ""}">
+          <div class="ex-head"><div class="grow"><b>${esc(e.n)}</b><div class="xs muted">${reps.length} séries · ${esc(reps.join("/"))} reps${lastTxt ? ` · última vez (${shortDate(last.data)}): ${esc(lastTxt)}` : ""}</div></div>
+            <label class="xs muted" style="display:flex;align-items:center;gap:6px">Feito <input class="check" type="checkbox" aria-label="Feito ${esc(e.n)}" data-c="exok" data-tid="${sel.id}" data-i="${i}" ${ses.ok && ses.ok[i] ? "checked" : ""}></label></div>
+          <div class="sets">${reps.map((r, j) => { const ph = last && last.sets && last.sets[j] != null && last.sets[j] !== "" ? num(last.sets[j]) : (last && !last.sets && last.kg != null ? num(last.kg) : "");
+            return `<label class="set"><span>S${j + 1}${r ? ` · ${esc(r)}` : ""}</span><input class="input" inputmode="decimal" aria-label="${esc(e.n)}, série ${j + 1}, kg" data-c="setkg" data-tid="${sel.id}" data-i="${i}" data-j="${j}" value="${cur[j] != null && cur[j] !== "" ? esc(num(cur[j], 2)) : ""}" placeholder="${esc(ph || "kg")}"></label>`; }).join("")}
+            <button class="linkbtn" type="button" data-a="sets-copy" data-tid="${sel.id}" data-i="${i}" title="Repetir o peso da 1.ª série nas outras">= todas</button></div>
+        </div>`; }).join("")}</div>
       <div class="dlg-actions"><button class="btn ${ses.feito ? "ghost" : "acc"}" type="button" data-a="ses-done" data-tid="${sel.id}">${ses.feito ? "Treino concluído ✓ (desfazer)" : "Concluir treino"}</button></div>`;
   }
   /* progresso */
@@ -1712,6 +1744,14 @@ const A = {
   "gm": el => { const d = pdk(UI.gasMes + "-01"); d.setMonth(d.getMonth() + (+el.dataset.v)); UI.gasMes = ym(dk(d)); render(); },
   "cd": el => { const n = addDays(UI.comDia, +el.dataset.v); if (n <= today()){ UI.comDia = n; render(); } },
   "agua": el => { const k = el.dataset.k, o = byId("agua", k); const l = Math.max(0, r2((o && !o.del ? +o.l || 0 : 0) + (+el.dataset.v))); put("agua", {id:k, l, del:false}); save(); render(); },
+  "sets-copy": el => {
+    const t = today(), tid = el.dataset.tid, i = el.dataset.i, box = el.closest(".ex"), ins = box ? [...box.querySelectorAll('[data-c="setkg"]')] : [];
+    const v = ins.length && ins[0].value.trim(); if (!v){ toast("Escreve primeiro o peso da 1.ª série."); return; }
+    const s = sessao(t, tid) || {id:`${t}|${tid}`, data:t, treinoId:tid, kg:{}, ok:{}, sets:{}};
+    const sets = JSON.parse(JSON.stringify(s.sets || {})); sets[i] = ins.map(() => pnum(v));
+    const kg = Object.assign({}, s.kg, {[i]:pnum(v)}), ok = Object.assign({}, s.ok, {[i]:true});
+    put("sessoes", Object.assign({}, s, {sets, kg, ok})); save(); render();
+  },
   "plano-exemplo": () => { PLANO_EXEMPLO.forEach(p => put("treinos", JSON.parse(JSON.stringify(Object.assign({hora:S.cfg.treinoHora}, p))))); save(); render(); toast("Plano de exemplo criado. Ajusta os dias ao teu horário."); },
   "ses-done": el => { const t = today(), tid = el.dataset.tid, s = sessao(t, tid) || {id:`${t}|${tid}`, data:t, treinoId:tid, kg:{}, ok:{}}; put("sessoes", Object.assign({}, s, {feito:!s.feito})); save(); render(); if (!s.feito) toast("Bom treino! Registado."); },
   "inbox-ok": el => { const x = byId("inbox", el.dataset.id); if (x){ applyItem(x.dados || {}, (x.dados && x.dados.origem) || "auto"); put("inbox", {id:x.id, estado:"ok"}); save(); render(); toast("Registado."); } },
@@ -1782,6 +1822,17 @@ document.addEventListener("change", e => {
     const n = Object.assign({}, s, {kg:Object.assign({}, s.kg), ok:Object.assign({}, s.ok)});
     if (c === "kg") n.kg[i] = el.value.trim() === "" ? null : pnum(el.value); else n.ok[i] = el.checked;
     put("sessoes", n); save();
+  }
+  else if (c === "setkg"){
+    const tid = el.dataset.tid, i = el.dataset.i, j = +el.dataset.j, s = sessao(t, tid) || {id:`${t}|${tid}`, data:t, treinoId:tid, kg:{}, ok:{}, sets:{}};
+    const sets = JSON.parse(JSON.stringify(s.sets || {})), arr = sets[i] || [];
+    arr[j] = el.value.trim() === "" ? null : pnum(el.value); sets[i] = arr;
+    const vals = arr.filter(v => v != null && v !== ""), kg = Object.assign({}, s.kg); kg[i] = vals.length ? Math.max(...vals) : null;
+    const tr = byId("treinos", tid), nSeries = tr ? repsSeries(tr.ex[i]).length : arr.length, ok = Object.assign({}, s.ok);
+    if (vals.length >= nSeries) ok[i] = true;
+    put("sessoes", Object.assign({}, s, {sets, kg, ok}));
+    save();
+    if (ok[i] && !(s.ok || {})[i]){ const box = el.closest(".ex"); if (box){ box.classList.add("ex-ok"); const cb = box.querySelector('[data-c="exok"]'); if (cb) cb.checked = true; } }
   }
   else if (c === "treino-sel"){ UI.treinoSel[t] = el.value; render(); }
   else if (c === "ex-sel"){ UI.exSel = el.value; render(); }
