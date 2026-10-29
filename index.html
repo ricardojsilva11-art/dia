@@ -196,6 +196,20 @@ svg{flex-shrink:0}
 .tl-nowlab{position:absolute; top:4px; transform:translateX(-50%); padding:1px 6px; border-radius:6px; background:var(--red); color:#fff; font-size:11px; font-weight:800}
 .mlist .item{min-height:44px}
 .tl-axis{display:flex; justify-content:space-between; font-size:11px; font-weight:600; color:var(--faint); border-top:1px solid var(--line); padding-top:6px}
+.daybar{display:flex; align-items:center; gap:8px; background:var(--card); border-radius:22px; padding:8px}
+.dstrip{flex:1; display:grid; grid-template-columns:repeat(7,minmax(0,1fr)); gap:6px; min-width:0}
+.dbtn{border:0; background:transparent; border-radius:16px; padding:8px 4px; display:flex; flex-direction:column; align-items:center; gap:2px; color:var(--ink); min-width:0}
+.dbtn:hover{background:var(--soft)}
+.dbtn b{font-size:18px; font-weight:800; line-height:1.1}
+.dbtn .xs{color:var(--muted)}
+.dbtn.is-today b{color:var(--violet)}
+.dbtn.sel{background:var(--ink); color:var(--bg)}
+.dbtn.sel .xs, .dbtn.sel.is-today b{color:var(--bg)}
+.dmeta{display:flex; align-items:center; gap:3px; min-height:16px}
+.dn{font-style:normal; min-width:16px; height:16px; padding:0 4px; border-radius:8px; background:var(--violet-soft); color:var(--violet-ink); font-size:10px; font-weight:800; display:inline-flex; align-items:center; justify-content:center}
+.dn.late{background:var(--red-soft); color:var(--red)}
+.dpick{position:relative; width:44px; height:44px; border-radius:22px; background:var(--soft); display:inline-flex; align-items:center; justify-content:center; cursor:pointer; flex-shrink:0}
+.dpick input{position:absolute; inset:0; opacity:0; cursor:pointer; width:100%; height:100%}
 .week{display:grid; grid-template-columns:repeat(7,minmax(0,1fr)); gap:8px}
 .wd{border-radius:16px; padding:10px; background:var(--soft); display:flex; flex-direction:column; gap:6px; align-items:flex-start; min-width:0; border:0; text-align:left}
 .wd.today{background:var(--inv); color:var(--on-inv)}
@@ -339,6 +353,7 @@ pre{white-space:pre-wrap; overflow-wrap:anywhere; background:var(--soft); paddin
   .big{font-size:32px}
   .week{gap:5px} .wd{padding:8px 4px; align-items:center; border-radius:14px} .wd .hide-m{display:none}
   .day{min-height:58px; padding:5px; border-radius:11px} .day .evs{display:none}
+  .daybar{padding:6px; gap:4px; flex-wrap:wrap} .daybar .iconbtn{width:36px; height:36px} .dstrip{gap:2px; order:0} .dbtn{padding:6px 0} .dbtn b{font-size:16px} .dpick{width:36px; height:36px}
   .day.tday{min-height:64px} .tcount b{min-width:18px; height:18px; padding:0 4px}
   .cal,.cal-head{gap:5px}
   .timeline{height:118px}
@@ -381,7 +396,7 @@ pre{white-space:pre-wrap; overflow-wrap:anywhere; background:var(--soft); paddin
 /* ============================================================
    dia. — núcleo: dados, datas, sincronização, horário
    ============================================================ */
-const APP_VERSION = "2.4 · 29/10/2026";
+const APP_VERSION = "2.5 · 29/10/2026";
 const KEY = "dia-app-v1";
 const VENC_KEY = "vencimento-app-v1";
 const COLS = ["tarefas","eventos","gastos","fixos","refeicoes","agua","treinos","sessoes","inbox","turnos","saude","poupObj","poupMov","poupAuto"];
@@ -631,7 +646,7 @@ const isWork = s => s === "M" || s === "T" || s === "N";
 function shiftRange(s){ const h = S.cfg.horas[s]; if (!h) return null; let a = hm2m(h[0]), b = hm2m(h[1]); if (a == null || b == null) return null; if (b <= a) b += 1440; return [a, b]; }
 const shiftLabel = s => s ? (isWork(s) ? `Turno da ${SHIFT_NAME[s]}` : s === "F" ? "Férias" : "Folga") : "Sem horário";
 const chipCls = s => s && "MTNF".includes(s) ? "c-" + s : "c-x";
-const chipTxt = s => s ? (s === "-" ? "—" : s) : "?";
+const chipTxt = s => s ? (s === "-" ? "—" : s) : "·";
 
 /* turnos e treinos dos próximos 35 dias, para o calendário Google */
 function computeAgendaOut(){
@@ -919,47 +934,75 @@ function dayItems(k){
   const r = isWork(s) && shiftRange(s);
   if (r) out.push({cls:"tl-shift", nome:`Turno ${s} · ${m2hm(r[0])}–${m2hm(r[1])}`, ini:r[0], fim:Math.min(r[1], 1440), kind:"turno"});
   live("eventos").filter(e => e.data === k && e.hora).forEach(e => { const a = hm2m(e.hora); out.push({cls:"tl-ev", nome:e.t, ini:a, fim:a + (+e.dur || 60), kind:"ev"}); });
-  treinosDoDia(k).forEach(tr => { const a = hm2m(tr.hora || S.cfg.treinoHora) ?? 1050; const ses = sessao(k, tr.id); out.push({cls:"tl-tr", nome:"Treino · " + tr.nome, ini:a, fim:a + 60, kind:"tr", done:ses && ses.feito}); });
+  treinosDoDia(k).forEach(tr => { const a = hm2m(tr.hora || S.cfg.treinoHora) ?? 1050; const ses = sessao(k, tr.id); out.push({cls:"tl-tr", nome:/^treino/i.test(tr.nome) ? tr.nome : "Treino · " + tr.nome, ini:a, fim:a + 60, kind:"tr", done:ses && ses.feito}); });
   refeicoesDia(k).filter(r => r.hora).forEach(rf => { const a = hm2m(rf.hora); out.push({cls:"tl-food", nome:rf.tipo || "Refeição", ini:a, fim:a + 30, kind:"food"}); });
   return out.filter(x => x.ini != null);
 }
-function heroSentence(){
-  const t = today(), s = shiftOf(t), parts = [];
-  const nm0 = nowMin();
+function heroSentence(k){
+  const t = today(); k = k || t;
+  const s = shiftOf(k), parts = [], isT = k === t, nm0 = nowMin();
   if (isWork(s)){ const r = shiftRange(s);
-    if (nm0 >= r[1]) parts.push(`Turno da ${SHIFT_NAME[s]} feito.`);
-    else if (nm0 >= r[0]) parts.push(`Estás no turno da ${SHIFT_NAME[s]} até às ${m2hm(r[1])}.`);
-    else parts.push(`Hoje tens turno da ${SHIFT_NAME[s]}, ${m2hm(r[0])}–${m2hm(r[1])}.`); }
-  else if (s === "F") parts.push("Hoje estás de férias.");
-  else if (s === "-") parts.push("Hoje é dia de folga.");
-  const nm = nowMin();
-  const next = dayItems(t).filter(x => x.ini > nm && x.kind !== "turno" && x.kind !== "food").sort((a, b) => a.ini - b.ini).slice(0, 2);
-  if (next.length) parts.push("A seguir: " + next.map(x => `${x.nome.replace("Treino · ", "treino de ").toLowerCase()} às ${m2hm(x.ini)}`).join(" e ") + ".");
-  const p = pendingTasks().length; if (p) parts.push(`${p} ${p === 1 ? "tarefa" : "tarefas"} por fazer.`);
+    if (isT && nm0 >= r[1]) parts.push(`Turno da ${SHIFT_NAME[s]} feito.`);
+    else if (isT && nm0 >= r[0]) parts.push(`Estás no turno da ${SHIFT_NAME[s]} até às ${m2hm(r[1])}.`);
+    else parts.push(`${isT ? "Hoje tens" : k < t ? "Tiveste" : "Tens"} turno da ${SHIFT_NAME[s]}, ${m2hm(r[0])}–${m2hm(r[1])}.`); }
+  else if (s === "F") parts.push(isT ? "Hoje estás de férias." : "Dia de férias.");
+  else if (s === "-") parts.push(isT ? "Hoje é dia de folga." : "Dia de folga.");
+  const lim = isT ? nm0 : -1;
+  const next = dayItems(k).filter(x => x.ini > lim && x.kind !== "turno" && x.kind !== "food").sort((a, b) => a.ini - b.ini).slice(0, 2);
+  if (next.length) parts.push((isT ? "A seguir: " : "Na agenda: ") + next.map(x => `${x.kind === "tr" ? x.nome.toLowerCase() : x.nome} às ${m2hm(x.ini)}`).join(" e ") + ".");
+  const p = isT ? pendingTasks().length : live("tarefas").filter(x => x.data === k && !x.feito).length;
+  if (p) parts.push(`${p} ${p === 1 ? "tarefa" : "tarefas"} por fazer.`);
   return parts.join(" ");
+}
+/* barra de dias no topo: escolhe o dia que queres ver */
+function dayBar(k){
+  const t = today(), mon = addDays(k, -((pdk(k).getDay() + 6) % 7));
+  const dias = Array.from({length:7}, (_, i) => addDays(mon, i)).map(d => {
+    const s = shiftOf(d), n = live("tarefas").filter(x => x.data === d && !x.feito).length, late = d < t && n, ne = live("eventos").filter(e => e.data === d).length;
+    return `<button type="button" class="dbtn ${d === k ? "sel" : ""} ${d === t ? "is-today" : ""}" data-a="hdia" data-k="${d}" aria-pressed="${d === k}" aria-label="${longDate(d)}">
+      <span class="xs">${DOW3[pdk(d).getDay()]}</span><b>${pdk(d).getDate()}</b>
+      <span class="dmeta">${s ? `<span class="chip ${chipCls(s)}" style="padding:0 5px;font-size:10px">${s === "-" ? "—" : s}</span>` : ""}${n ? `<i class="dn ${late ? "late" : ""}">${n}</i>` : ""}${ne ? '<i class="ev"></i>' : ""}</span></button>`;
+  }).join("");
+  return `<section class="daybar" aria-label="Escolher o dia">
+    <button class="iconbtn" type="button" data-a="hsem" data-v="-7" aria-label="Semana anterior">${ic("left")}</button>
+    <div class="dstrip">${dias}</div>
+    <button class="iconbtn" type="button" data-a="hsem" data-v="7" aria-label="Semana seguinte">${ic("right")}</button>
+    <label class="dpick" title="Escolher outra data">${ic("cal", 18)}<span class="sr">Escolher data</span><input type="date" data-c="hdia-pick" value="${k}"></label>
+    ${k !== t ? `<button class="btn sm" type="button" data-a="hdia" data-k="${t}">Hoje</button>` : ""}
+  </section>`;
 }
 function vHoje(){
   const t = today(), h = new Date().getHours(), nm = nowMin();
+  if (UI.hojeDiaEm !== t){ UI.hojeDia = t; UI.hojeDiaEm = t; }
+  const k = UI.hojeDia || t, isT = k === t;
   const hi = h < 6 ? "Boa noite" : h < 13 ? "Bom dia" : h < 20 ? "Boa tarde" : "Boa noite";
   const nome = (S.cfg.nome || "").trim().split(" ")[0];
-  const now = computeNow();
+  const s = shiftOf(k);
   let nowHtml;
-  if (now.tipo === "turno"){
-    const pct = Math.min(100, Math.max(0, (nm - now.ini) / (now.fim - now.ini) * 100)), left = now.fim - nm;
-    nowHtml = `<div class="card-head"><span class="eyebrow">Agora</span><span class="chip" style="background:#16161A;color:var(--accent)">${now.s}</span></div>
-      <div><div class="mid">${shiftLabel(now.s)}</div><div class="small" style="font-weight:600">Faltam ${dur(left)} · sais às ${m2hm(now.fim)}</div></div>
-      <div class="bar"><i style="width:${pct.toFixed(0)}%"></i></div>`;
-  } else if (now.tipo === "seguir"){
-    nowHtml = `<div class="card-head"><span class="eyebrow">A seguir</span>${now.s ? `<span class="chip" style="background:#16161A;color:var(--accent)">${chipTxt(now.s)}</span>` : ""}</div>
-      <div><div class="mid">${esc(now.it.nome)}</div><div class="small" style="font-weight:600">Às ${m2hm(now.it.ini)} · daqui a ${dur(now.it.ini - nm)}</div></div>
-      <a class="btn" href="#horario" style="background:#16161A;color:#fff;align-self:flex-start">Ver horário</a>`;
+  if (isT){
+    const now = computeNow();
+    if (now.tipo === "turno"){
+      const pct = Math.min(100, Math.max(0, (nm - now.ini) / (now.fim - now.ini) * 100)), left = now.fim - nm;
+      nowHtml = `<div class="card-head"><span class="eyebrow">Agora</span><span class="chip" style="background:#16161A;color:var(--accent)">${now.s}</span></div>
+        <div><div class="mid">${shiftLabel(now.s)}</div><div class="small" style="font-weight:600">Faltam ${dur(left)} · sais às ${m2hm(now.fim)}</div></div>
+        <div class="bar"><i style="width:${pct.toFixed(0)}%"></i></div>`;
+    } else if (now.tipo === "seguir"){
+      nowHtml = `<div class="card-head"><span class="eyebrow">A seguir</span>${now.s ? `<span class="chip" style="background:#16161A;color:var(--accent)">${chipTxt(now.s)}</span>` : ""}</div>
+        <div><div class="mid">${esc(now.it.nome)}</div><div class="small" style="font-weight:600">Às ${m2hm(now.it.ini)} · daqui a ${dur(now.it.ini - nm)}</div></div>
+        <a class="btn" href="#horario" style="background:#16161A;color:#fff;align-self:flex-start">Ver horário</a>`;
+    } else {
+      nowHtml = `<div class="card-head"><span class="eyebrow">Agora</span>${now.s ? `<span class="chip" style="background:#16161A;color:var(--accent)">${chipTxt(now.s)}</span>` : ""}</div>
+        <div><div class="mid">${now.s === "F" ? "Férias" : now.s === "-" ? "Dia de folga" : "Nada marcado"}</div><div class="small" style="font-weight:600">Mais nada no horário para hoje.</div></div>
+        <button class="btn" type="button" data-a="add-evento" style="background:#16161A;color:#fff;align-self:flex-start">+ Compromisso</button>`;
+    }
   } else {
-    nowHtml = `<div class="card-head"><span class="eyebrow">Agora</span>${now.s ? `<span class="chip" style="background:#16161A;color:var(--accent)">${chipTxt(now.s)}</span>` : ""}</div>
-      <div><div class="mid">${now.s === "F" ? "Férias" : now.s === "-" ? "Dia de folga" : "Nada marcado"}</div><div class="small" style="font-weight:600">Mais nada no horário para hoje.</div></div>
-      <button class="btn" type="button" data-a="add-evento" style="background:#16161A;color:#fff;align-self:flex-start">+ Compromisso</button>`;
+    const r = isWork(s) && shiftRange(s), ne = live("eventos").filter(e => e.data === k).length;
+    nowHtml = `<div class="card-head"><span class="eyebrow">${k > t ? "Daqui a " + Math.round((pdk(k) - pdk(t)) / 864e5) + " dias" : "Há " + Math.round((pdk(t) - pdk(k)) / 864e5) + " dias"}</span>${s ? `<span class="chip" style="background:#16161A;color:var(--accent)">${chipTxt(s)}</span>` : ""}</div>
+      <div><div class="mid">${shiftLabel(s)}</div><div class="small" style="font-weight:600">${r ? `${m2hm(r[0])}–${m2hm(r[1])}` : isHoliday(k) ? "Feriado" : "Sem turno"}${ne ? ` · ${ne} compromisso${ne > 1 ? "s" : ""}` : ""}</div></div>
+      <button class="btn" type="button" data-a="add-evento-dia" data-k="${k}" style="background:#16161A;color:#fff;align-self:flex-start">+ Compromisso neste dia</button>`;
   }
   /* linha do tempo */
-  const items = dayItems(t).sort((a, b) => a.ini - b.ini);
+  const items = dayItems(k).sort((a, b) => a.ini - b.ini);
   let lastTop = -999, lastBot = -999;
   const tl = items.map(x => {
     const L = x.ini / 1440 * 100, W = Math.max(1.6, (x.fim - x.ini) / 1440 * 100);
@@ -971,82 +1014,77 @@ function vHoje(){
       <span class="tl-lab" style="left:min(${L}%, calc(100% - 120px));top:${pos === "top" ? 6 : 84}px">${m2hm(x.ini)} ${esc(x.nome.length > 22 ? x.nome.slice(0, 21) + "…" : x.nome)}${x.done ? " ✓" : ""}</span>`;
   }).join("");
   const nowL = nm / 1440 * 100;
-  /* semana */
-  const week = Array.from({length:7}, (_, i) => addDays(t, i)).map(k => {
-    const s = shiftOf(k), d = pdk(k), hol = isHoliday(k);
-    return `<a class="wd ${k === t ? "today" : ""}" href="#horario" style="text-decoration:none">
-      <span class="xs">${DOW3[d.getDay()]} ${d.getDate()}${hol ? " ★" : ""}</span>
-      <span class="chip ${chipCls(s)}">${chipTxt(s)}</span>
-      <span class="xs hide-m">${isWork(s) ? S.cfg.horas[s].join("–") : s === "F" ? "Férias" : s === "-" ? "Folga" : ""}</span></a>`;
-  }).join("");
-  /* tarefas */
-  const tasks = pendingTasks().sort((a, b) => (a.data || "9").localeCompare(b.data || "9") || prioN(a) - prioN(b)).slice(0, 4);
+  /* tarefas do dia */
+  const tasks = (isT ? pendingTasks() : live("tarefas").filter(x => x.data === k)).sort((a, b) => (a.feito - b.feito) || (a.data || "9").localeCompare(b.data || "9") || (a.hora || "99").localeCompare(b.hora || "99") || prioN(a) - prioN(b));
+  const nAbertas = tasks.filter(x => !x.feito).length;
   /* gastos */
-  const gHoje = somaGastos(live("gastos").filter(g => g.data === t));
-  const days7 = Array.from({length:7}, (_, i) => addDays(t, i - 6)).map(k => somaGastos(live("gastos").filter(g => g.data === k)));
+  const gDia = somaGastos(live("gastos").filter(g => g.data === k));
+  const days7 = Array.from({length:7}, (_, i) => addDays(k, i - 6)).map(d => somaGastos(live("gastos").filter(g => g.data === d)));
   const max7 = Math.max(1, ...days7);
-  const gMes = somaGastos(gastosMes(ym(t)));
-  /* treino */
-  const trs = treinosDoDia(t), s = shiftOf(t);
-  /* comida */
-  const tot = totaisDia(t), M = S.cfg.metas;
+  const gMes = somaGastos(gastosMes(ym(k)));
+  /* treino e comida */
+  const trs = treinosDoDia(k);
+  const tot = totaisDia(k), M = S.cfg.metas;
   const inbox = live("inbox").filter(x => x.estado === "pendente");
-  const sau = S.saude.find(x => x.id === addDays(t, -1) && !x.del) || S.saude.find(x => x.id === t && !x.del);
+  const sau = isT ? (S.saude.find(x => x.id === addDays(t, -1) && !x.del) || S.saude.find(x => x.id === t && !x.del)) : S.saude.find(x => x.id === k && !x.del);
+  const quando = isT ? "hoje" : k === addDays(t, 1) ? "amanhã" : k === addDays(t, -1) ? "ontem" : "neste dia";
   return `
+  ${dayBar(k)}
   <section class="hero">
     <div class="hero-text">
-      <p class="small muted" style="margin:0;font-weight:600">${longDate(t)}</p>
-      <h1>${hi}${nome ? ", " + esc(nome) : ""}. <span>${esc(heroSentence())}</span></h1>
+      <p class="small muted" style="margin:0;font-weight:600">${longDate(k)}${isT ? "" : " · " + relDate(k)}</p>
+      <h1>${isT ? `${hi}${nome ? ", " + esc(nome) : ""}.` : `${relDate(k)}.`} <span>${esc(heroSentence(k)) || (isT ? "Nada marcado para hoje." : "Nada marcado para este dia.")}</span></h1>
     </div>
     <div class="now">${nowHtml}</div>
   </section>
 
-  ${inbox.length ? `<section class="inbox-row" aria-label="Entrou sozinho">
+  ${isT && inbox.length ? `<section class="inbox-row" aria-label="Entrou sozinho">
     <b class="small">Entrou sozinho</b>
     ${inbox.slice(0, 6).map(x => `<span class="pill">${esc(itemTitle(x.dados || {}))} <span class="xs muted">${esc(x.origem || "")}</span>
       <button class="btn" type="button" data-a="inbox-ok" data-id="${x.id}">Confirmar</button><button class="x" type="button" data-a="inbox-no" data-id="${x.id}" aria-label="Rejeitar">${ic("x", 16)}</button></span>`).join("")}
   </section>` : ""}
 
-  <section class="card" aria-label="Linha do tempo de hoje">
-    <div class="card-head"><h2>O teu dia</h2><span class="xs muted">${S.venc ? "Horário da app Vencimentos" : "Liga o horário em Definições › Vencimentos"}</span></div>
-    <div class="list mlist show-m">${items.filter(x => x.fim > nm).map(x => `<div class="item"><b class="small" style="width:48px">${m2hm(x.ini)}</b><span class="chip ${x.kind === "turno" ? "c-x" : x.kind === "tr" ? "c-ok" : x.kind === "food" ? "c-media" : "c-ia"}">${{turno:"Turno", ev:"Agenda", tr:"Treino", food:"Comida"}[x.kind]}</span><span class="grow small">${esc(x.nome)}${x.done ? " ✓" : ""}</span></div>`).join("") || '<div class="empty">Nada mais para hoje.</div>'}</div>
-    <div class="timeline hide-m">${tl}<div class="tl-now" style="left:${nowL}%"></div><span class="tl-nowlab" style="left:${nowL}%">${m2hm(nm)}</span></div>
+  <section class="card" aria-label="Linha do tempo">
+    <div class="card-head"><h2>${isT ? "O teu dia" : "Este dia"}</h2><span class="xs muted">${S.venc ? "Horário da app Vencimentos" : "Liga o horário em Definições › Vencimentos"}</span></div>
+    <div class="list mlist show-m">${items.filter(x => !isT || x.fim > nm).map(x => `<div class="item"><b class="small" style="width:48px">${m2hm(x.ini)}</b><span class="chip ${x.kind === "turno" ? "c-x" : x.kind === "tr" ? "c-ok" : x.kind === "food" ? "c-media" : "c-ia"}">${{turno:"Turno", ev:"Agenda", tr:"Treino", food:"Comida"}[x.kind]}</span><span class="grow small">${esc(x.nome)}${x.done ? " ✓" : ""}</span></div>`).join("") || `<div class="empty">${isT ? "Nada mais para hoje." : "Nada marcado neste dia."}</div>`}</div>
+    <div class="timeline hide-m">${tl}${isT ? `<div class="tl-now" style="left:${nowL}%"></div><span class="tl-nowlab" style="left:${nowL}%">${m2hm(nm)}</span>` : ""}</div>
     <div class="tl-axis hide-m"><span>00h</span><span>04h</span><span>08h</span><span>12h</span><span>16h</span><span>20h</span><span>24h</span></div>
-    ${S.venc || live("turnos").length ? `<div class="week" style="margin-top:6px">${week}</div>` : `<div class="empty" style="text-align:left">Ainda não há horário. <a href="#definicoes" style="font-weight:700">Liga a app Vencimentos</a> ou importa a escala no separador Horário.</div>`}
   </section>
 
   <section class="grid g4">
     <div class="card">
-      <div class="card-head"><h2>Tarefas</h2><span class="mid">${pendingTasks().length}</span></div>
-      <div class="list">${tasks.map(x => taskRow(x, true)).join("") || '<div class="empty">Tudo feito por hoje.</div>'}</div>
-      <a class="linkbtn" href="#tarefas" style="text-decoration:none">Ver todas →</a>
+      <div class="card-head"><h2>Tarefas ${quando}</h2><span class="mid">${nAbertas}</span></div>
+      <div class="list">${tasks.slice(0, 6).map(x => taskRow(x, true)).join("") || `<div class="empty">${isT ? "Tudo feito por hoje." : "Sem tarefas neste dia."}</div>`}</div>
+      <form class="quickadd" data-form="quick-task" data-dia="${k}" autocomplete="off" style="background:var(--bg);padding:4px 4px 4px 12px">
+        <label for="qt" class="sr">Nova tarefa para ${longDate(k)}</label><input id="qt" name="q" placeholder="+ Tarefa ${quando}" style="height:38px"><button class="btn sm" type="submit">OK</button></form>
+      <button class="linkbtn" type="button" data-a="ver-tarefas-dia" data-k="${k}" style="align-self:flex-start">Ver no calendário →</button>
     </div>
     <div class="card">
-      <div class="card-head"><h2>Gastos hoje</h2><button class="linkbtn" type="button" data-a="add-gasto">+ Gasto</button></div>
-      <div class="big">${eur(gHoje)}</div>
-      <div class="spark" role="img" aria-label="Gastos dos últimos 7 dias">${days7.map((v, i) => `<i class="${i === 6 ? "on" : ""}" style="height:${Math.max(4, v / max7 * 100)}%" title="${eur(v)}"></i>`).join("")}</div>
-      <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap"><span class="small muted">${eur(gMes)}${orcTotal() ? ` de ${eur0(orcTotal())}` : ""} este mês</span><button class="linkbtn" type="button" data-a="orc">Mudar orçamento</button></div>
+      <div class="card-head"><h2>Gastos ${quando}</h2><button class="linkbtn" type="button" data-a="add-gasto-dia" data-k="${k}">+ Gasto</button></div>
+      <div class="big">${eur(gDia)}</div>
+      <div class="spark" role="img" aria-label="Gastos dos 7 dias até este dia">${days7.map((v, i) => `<i class="${i === 6 ? "on" : ""}" style="height:${Math.max(4, v / max7 * 100)}%" title="${eur(v)}"></i>`).join("")}</div>
+      <span class="small muted">${eur(gMes)} em ${MESES[pdk(k).getMonth()]}</span>
     </div>
     <div class="card inv">
       <div class="card-head"><h2>Treino${trs[0] ? " · " + esc(trs[0].hora || S.cfg.treinoHora) : ""}</h2>${s === "N" ? '<span class="chip c-N">Noite</span>' : ""}</div>
       ${trs.length ? `<div class="mid">${esc(trs.map(x => x.nome).join(" + "))}</div>
         <span class="small muted">${trs.reduce((a, x) => a + (x.ex || []).length, 0)} exercícios${s === "N" ? " · dia de noite: faz leve ou descansa" : ""}</span>
-        <a class="btn acc" href="#treino" style="margin-top:auto">${trs.every(x => (sessao(t, x.id) || {}).feito) ? "Feito ✓ · ver" : "Começar"}</a>`
-      : `<div class="mid">Descanso</div><span class="small muted">${live("treinos").length ? "Nenhum treino planeado para hoje." : "Ainda não tens plano de treino."}</span><a class="btn acc" href="#treino" style="margin-top:auto">${live("treinos").length ? "Ver plano" : "Criar plano"}</a>`}
+        <a class="btn acc" href="#treino" style="margin-top:auto">${trs.every(x => (sessao(k, x.id) || {}).feito) ? "Feito ✓ · ver" : isT ? "Começar" : "Ver treino"}</a>`
+      : `<div class="mid">Descanso</div><span class="small muted">${live("treinos").length ? "Nenhum treino planeado " + (isT ? "para hoje." : "neste dia.") : "Ainda não tens plano de treino."}</span><a class="btn acc" href="#treino" style="margin-top:auto">${live("treinos").length ? "Ver plano" : "Criar plano"}</a>`}
     </div>
     <div class="card">
-      <div class="card-head"><h2>Comida</h2><button class="linkbtn" type="button" data-a="add-refeicao">+ Refeição</button></div>
+      <div class="card-head"><h2>Comida</h2><button class="linkbtn" type="button" data-a="add-refeicao-dia" data-k="${k}">+ Refeição</button></div>
       <div style="display:flex;align-items:baseline;gap:6px"><span class="big">${Math.round(Math.max(0, M.kcal - tot.kcal))}</span><span class="small muted">kcal restantes</span></div>
       ${macrosHtml(tot)}
-      <div style="display:flex;gap:8px;align-items:center"><button class="btn sm ghost" type="button" data-a="agua" data-v="0.25" data-k="${t}">${ic("drop", 16)} +250 ml</button><span class="xs muted">${num(tot.agua, 2)} de ${num(M.agua)} L</span></div>
+      <div style="display:flex;gap:8px;align-items:center"><button class="btn sm ghost" type="button" data-a="agua" data-v="0.25" data-k="${k}">${ic("drop", 16)} +250 ml</button><span class="xs muted">${num(tot.agua, 2)} de ${num(M.agua)} L</span></div>
     </div>
   </section>
-  ${live("poupObj").length ? `<a class="card" href="#poupanca" style="text-decoration:none;flex-direction:row;flex-wrap:wrap;align-items:center;gap:18px">
+  ${isT && live("poupObj").length ? `<a class="card" href="#poupanca" style="text-decoration:none;flex-direction:row;flex-wrap:wrap;align-items:center;gap:18px">
     <div><div class="small muted" style="font-weight:700">Poupança</div><div class="mid">${eur0(totalPoupado())}</div></div>
     ${live("poupObj").filter(o => +o.alvo > 0).slice(0, 3).map(o => { const v = saldoObj(o.id), p = Math.min(100, v / o.alvo * 100); return `<div style="flex:1 1 180px;min-width:0"><div class="small" style="display:flex;justify-content:space-between;gap:8px"><b>${esc(o.nome)}</b><span class="muted">${Math.round(p)} %</span></div><div class="bar" style="margin-top:6px"><i style="width:${p.toFixed(0)}%;background:var(--green)"></i></div></div>`; }).join("")}
   </a>` : ""}
   ${sau ? `<section class="inbox-row"><b class="small">Saúde</b>${sau.sono ? `<span class="pill" style="padding-right:14px">Sono ${num(sau.sono)} h</span>` : ""}${sau.passos ? `<span class="pill" style="padding-right:14px">${Math.round(sau.passos).toLocaleString("pt-PT")} passos</span>` : ""}${sau.peso ? `<span class="pill" style="padding-right:14px">${num(sau.peso)} kg</span>` : ""}<span class="xs muted">Apple Saúde · ${relDate(sau.id).toLowerCase()}</span></section>` : ""}
-  ${aiCard("auto", "Larga aqui qualquer documento: a IA percebe se é fatura, escala, plano ou refeição", "Faturas, talões, escalas, planos, fotos de refeições")}
+  ${isT ? aiCard("auto", "Larga aqui qualquer documento: a IA percebe se é fatura, escala, plano ou refeição", "Faturas, talões, escalas, planos, fotos de refeições") : ""}
   `;
 }
 function macrosHtml(tot){
@@ -1865,6 +1903,12 @@ function applyItem(it, origem = "ia"){
 const A = {
   "del": el => { const c = el.dataset.col; remove(c, el.dataset.id); save(); render(); toast("Apagado."); },
   "tf": el => { UI.tarefasFiltro = el.dataset.v; render(); },
+  "hdia": el => { UI.hojeDia = el.dataset.k; render(); },
+  "hsem": el => { UI.hojeDia = addDays(UI.hojeDia || today(), +el.dataset.v); render(); },
+  "ver-tarefas-dia": el => { UI.tarefasFiltro = "dia"; UI.tDia = el.dataset.k; UI.tMes = ym(el.dataset.k); location.hash = "#tarefas"; },
+  "add-evento-dia": el => dlgEvento({}, el.dataset.k),
+  "add-gasto-dia": el => dlgGasto({data:el.dataset.k}),
+  "add-refeicao-dia": el => { UI.comDia = el.dataset.k; dlgRefeicao({data:el.dataset.k}); },
   "tdia": el => { UI.tDia = el.dataset.k; UI.tMes = ym(el.dataset.k); render(); },
   "tdia-mv": el => { UI.tDia = addDays(UI.tDia || today(), +el.dataset.v); UI.tMes = ym(UI.tDia); render(); },
   "tmes": el => { const d = pdk((UI.tMes || ym(UI.tDia || today())) + "-01"); d.setMonth(d.getMonth() + (+el.dataset.v)); UI.tMes = ym(dk(d)); render(); },
@@ -1975,6 +2019,7 @@ document.addEventListener("change", e => {
     save();
     if (ok[i] && !(s.ok || {})[i]){ const box = el.closest(".ex"); if (box){ box.classList.add("ex-ok"); const cb = box.querySelector('[data-c="exok"]'); if (cb) cb.checked = true; } }
   }
+  else if (c === "hdia-pick"){ if (el.value){ UI.hojeDia = el.value; render(); } }
   else if (c === "treino-sel"){ UI.treinoSel[t] = el.value; render(); }
   else if (c === "ex-sel"){ UI.exSel = el.value; render(); }
   else if (c === "evo-sel"){ UI.evoTreino = el.value; render(); }
