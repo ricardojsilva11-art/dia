@@ -372,6 +372,12 @@ pre{white-space:pre-wrap; overflow-wrap:anywhere; background:var(--soft); paddin
 @media (min-width:761px){ .show-m{display:none} }
 @media (prefers-reduced-motion:reduce){ *{animation:none!important; transition:none!important} }
 
+[hidden]{display:none !important}
+.avisos{display:flex; flex-wrap:wrap; gap:8px}
+.aviso{display:inline-flex; align-items:center; gap:8px; padding:10px 14px; border-radius:16px; background:var(--card); color:var(--ink); text-decoration:none; font-size:14px; border:1.5px solid var(--amber-ink); min-height:44px}
+.aviso svg{color:var(--amber-ink); flex-shrink:0}
+.aviso.red{border-color:var(--red)} .aviso.red svg{color:var(--red)}
+
 </style>
 </head>
 <body>
@@ -399,10 +405,10 @@ pre{white-space:pre-wrap; overflow-wrap:anywhere; background:var(--soft); paddin
 /* ============================================================
    dia. — núcleo: dados, datas, sincronização, horário
    ============================================================ */
-const APP_VERSION = "2.8 · 29/10/2026";
+const APP_VERSION = "3.0 · 29/10/2026";
 const KEY = "dia-app-v1";
 const VENC_KEY = "vencimento-app-v1";
-const COLS = ["tarefas","eventos","gastos","fixos","refeicoes","agua","treinos","sessoes","inbox","turnos","saude","poupObj","poupMov","poupAuto"];
+const COLS = ["tarefas","eventos","gastos","fixos","refeicoes","agua","treinos","sessoes","inbox","turnos","saude","poupObj","poupMov","poupAuto","recorr","extras"];
 const DOW = ["Domingo","Segunda","Terça","Quarta","Quinta","Sexta","Sábado"];
 const DOW3 = ["Dom","Seg","Ter","Qua","Qui","Sex","Sáb"];
 const MESES = ["janeiro","fevereiro","março","abril","maio","junho","julho","agosto","setembro","outubro","novembro","dezembro"];
@@ -450,7 +456,7 @@ function defaultState(){
           metas:{kcal:2200, p:140, h:250, g:73, agua:2.5},
           orc:Object.assign({}, DEFAULT_ORC) },
     venc:null, agendaOut:null, gstatus:null, analise:null,
-    local:{ sync:{url:"", code:"", last:0, err:""} } };
+    local:{ sync:{url:"", code:"", last:0, err:""}, push:{} } };
   COLS.forEach(c => s[c] = []);
   return s;
 }
@@ -538,6 +544,7 @@ async function syncNow(manual){
     const before = JSON.stringify(payload());
     const j = await api("/api/sync", {data:payload()});
     S = mergeState(S, j.data);
+    if (ensureRecorr()) setTimeout(() => save(), 0);
     const d = j.data || {}, n = c => (d[c] || []).filter(x => !x.del).length;
     S.local.sync.server = {tarefas:n("tarefas"), gastos:n("gastos"), treinos:n("treinos"), refeicoes:n("refeicoes"), venc:!!d.venc};
     S.local.sync.last = Date.now(); S.local.sync.err = "";
@@ -575,15 +582,10 @@ function vencSnapshot(v, fonte){
 function vencSame(a, b){ if (!a || !b) return false; const f = x => JSON.stringify([x.rot, x.dias, x.mun, x.carnaval, x.full || null]); return f(a) === f(b); }
 /* vencimento líquido de um mês, calculado com as regras da app Vencimentos */
 let vencCache = {k:null, e:null};
-function vencMes(k = today()){
-  const v = S.venc; if (!v || !v.full) return null;
-  try{
-    const ck = v.upd + "|" + JSON.stringify(v.full).length;
-    if (vencCache.k !== ck){ vencCache = {k:ck, e:vencEngine(v.full)}; }
-    const d = pdk(k), p = vencCache.e.payment(d.getFullYear(), d.getMonth());
-    if (!p || !isFinite(p.liquido) || p.fixo <= 0) return null;
-    return {liquido:p.liquido, bruto:p.bruto, irs:p.irsTotal, ss:p.ss, desc:p.desc, alim:p.alim};
-  }catch(e){ return null; }
+/* inclui as trocas de turno e horas extra registadas nesta app (ver extra.js) */
+function vencMes(k = today(), semAjustes){
+  const p = pagamentoMes(k, semAjustes); if (!p) return null;
+  return {liquido:p.liquido, bruto:p.bruto, irs:p.irsTotal, ss:p.ss, desc:p.desc, alim:p.alim, extra:p.extra};
 }
 /* quanto falta gastar este mês: vencimento líquido − gastos − poupança do mês */
 function disponivelMes(k = today()){
@@ -808,6 +810,360 @@ const PLANO_EXEMPLO = [
 ];
 
 /* ============================================================
+   dia. — avisos, tarefas que se repetem, trocas e horas extra,
+   resumo semanal, notificações, cópias e exportação para Excel
+   ============================================================ */
+const AVISOS_DEF = {tarefas:15, turno:60, fixosDias:3, orc:true, resumo:true, resumoHora:"20:00"};
+const avisos = () => Object.assign({}, AVISOS_DEF, S.cfg.avisos || {});
+const diasNoMes = m => new Date(+m.slice(0, 4), +m.slice(5, 7), 0).getDate();
+
+/* ---------- gastos: orçamento, previsão e despesas fixas ---------- */
+function alertasOrc(m = ym(today())){
+  const by = {};
+  gastosMes(m).forEach(g => by[g.cat || "Outros"] = (by[g.cat || "Outros"] || 0) + (+g.valor || 0));
+  return Object.entries(S.cfg.orc || {}).filter(([c, o]) => +o > 0 && (by[c] || 0) / o >= .9)
+    .map(([c, o]) => ({cat:c, gasto:r2(by[c] || 0), orc:+o, pct:(by[c] || 0) / o})).sort((a, b) => b.pct - a.pct);
+}
+/* ao ritmo atual: gastos variáveis projetados até ao fim do mês + todas as despesas fixas do mês */
+function previsaoMes(){
+  const t = today(), m = ym(t), d = +t.slice(8), nd = diasNoMes(m);
+  const arr = gastosMes(m), variaveis = somaGastos(arr.filter(g => g.origem !== "fixo"));
+  const fixosLanc = somaGastos(arr.filter(g => g.origem === "fixo"));
+  const fixosTot = Math.max(fixosLanc, live("fixos").reduce((a, f) => a + (+f.valor || 0), 0));
+  const gastos = r2(variaveis / d * nd + fixosTot);
+  const poup = r2(Math.max(poupadoMes(m), live("poupAuto").filter(a => live("poupObj").some(o => o.id === a.obj)).reduce((a, x) => a + (+x.valor || 0), 0)));
+  const vm = vencMes(t);
+  const base = vm ? vm.liquido : orcTotal();
+  return {gastos, poup, base, comVenc:!!vm, fim:r2(base - gastos - (vm ? poup : 0)), cedo:d < 5, dia:d, nd};
+}
+function fixosProximos(dias = avisos().fixosDias){
+  const t = today(), fim = addDays(t, Math.max(0, +dias || 0)), out = [];
+  live("fixos").forEach(f => {
+    for (const m of [ym(t), ym(addDays(`${ym(t)}-01`, 32))]){
+      const k = `${m}-${pad(Math.min(+f.dia || 1, diasNoMes(m)))}`;
+      if (k >= t && k <= fim){ out.push({f, data:k, em:Math.round((pdk(k) - pdk(t)) / 864e5)}); break; }
+    }
+  });
+  return out.sort((a, b) => a.data.localeCompare(b.data));
+}
+function avisosHtml(){
+  const out = [];
+  alertasOrc().forEach(a => out.push(`<a class="aviso ${a.pct >= 1 ? "red" : ""}" href="#gastos">${ic("alert", 16)}<span><b>${esc(a.cat)}</b> ${a.pct >= 1 ? `passou o orçamento em ${eur(a.gasto - a.orc)}` : `já vai em ${Math.round(a.pct * 100)} % do orçamento (faltam ${eur(a.orc - a.gasto)})`}</span></a>`));
+  fixosProximos().forEach(x => out.push(`<a class="aviso" href="#gastos">${ic("bell", 16)}<span><b>${esc(x.f.desc)}</b> ${eur(x.f.valor)} · ${x.em === 0 ? "hoje" : x.em === 1 ? "amanhã" : `daqui a ${x.em} dias`}</span></a>`));
+  return out.length ? `<section class="avisos" aria-label="Avisos">${out.join("")}</section>` : "";
+}
+
+/* ---------- tarefas que se repetem ---------- */
+const FREQ_TXT = {diaria:"todos os dias", semanal:"todas as semanas", mensal:"todos os meses", anual:"todos os anos"};
+function repTexto(r){
+  if (!r) return "";
+  if (r.freq === "semanal" && (r.dias || []).length) return (r.dias.length === 7 ? "todos os dias" : "às " + r.dias.slice().sort((a, b) => ((a + 6) % 7) - ((b + 6) % 7)).map(d => DOW[d].toLowerCase() + (d === 0 || d === 6 ? "s" : "s")).join(", ").replace(/, ([^,]*)$/, " e $1"));
+  if (r.freq === "mensal") return `todos os meses, dia ${r.dia}`;
+  if (r.freq === "anual" && r.mmdd) return `todos os anos, ${+r.mmdd.slice(3)} de ${MESES[+r.mmdd.slice(0, 2) - 1]}`;
+  return FREQ_TXT[r.freq] || "";
+}
+function recorrCai(r, k){
+  if (k < (r.desde || "")) return false;
+  const d = pdk(k);
+  if (r.freq === "diaria") return true;
+  if (r.freq === "semanal") return (r.dias && r.dias.length ? r.dias : [pdk(r.desde || k).getDay()]).includes(d.getDay());
+  if (r.freq === "mensal"){ const n = +r.dia || 1, last = diasNoMes(ym(k)); return d.getDate() === Math.min(n, last); }
+  if (r.freq === "anual") return k.slice(5) === (r.mmdd || (r.desde || "").slice(5));
+  return false;
+}
+/* cria as ocorrências das próximas semanas (id fixo evita duplicados entre aparelhos) */
+function ensureRecorr(){
+  const t = today(); let ch = false;
+  const series = live("recorr");
+  if (!series.length) return false;
+  const existe = new Set(S.tarefas.map(x => x.id)), porSerie = new Set(S.tarefas.filter(x => x.serie && !x.del).map(x => x.serie + "|" + x.data));
+  for (const r of series){
+    const ini = (r.desde || "") > t ? r.desde : t, dias = {diaria:7, semanal:21}[r.freq] || 40;
+    for (let i = 0; i < dias; i++){
+      const k = addDays(ini, i);
+      if (!recorrCai(r, k)) continue;
+      const id = `rc-${r.id}-${k}`;
+      if (existe.has(id) || porSerie.has(r.id + "|" + k)) continue;
+      put("tarefas", {id, t:r.t, data:k, hora:r.hora || "", prio:r.prio || "media", tag:r.tag || "", serie:r.id, feito:false});
+      existe.add(id); ch = true;
+    }
+  }
+  return ch;
+}
+/* aplica alterações da série às ocorrências futuras por fazer */
+function atualizarSerie(r){
+  const t = today();
+  S.tarefas.filter(x => x.serie === r.id && !x.del && !x.feito && x.data >= t).forEach(x => {
+    if (recorrCai(r, x.data)) put("tarefas", {id:x.id, t:r.t, hora:r.hora || "", prio:r.prio || "media", tag:r.tag || ""});
+    else remove("tarefas", x.id);
+  });
+}
+function pararSerie(id){
+  const t = today();
+  remove("recorr", id);
+  S.tarefas.filter(x => x.serie === id && !x.del && !x.feito && x.data > t).forEach(x => remove("tarefas", x.id));
+}
+/* tarefas antigas com «repetir» passam a séries */
+function migrarRep(){
+  let ch = false;
+  S.tarefas.filter(x => !x.del && x.rep && !x.gerou && !x.serie && !x.feito).forEach(x => {
+    const d = x.data || today();
+    const r = put("recorr", {t:x.t, hora:x.hora || "", prio:x.prio || "media", tag:x.tag || "", freq:x.rep, dias:x.rep === "semanal" ? [pdk(d).getDay()] : [], dia:pdk(d).getDate(), mmdd:d.slice(5), desde:d});
+    put("tarefas", {id:x.id, serie:r.id, rep:""}); ch = true;
+  });
+  return ch;
+}
+/* «lixo todas as terças», «pagar luz todos os meses dia 8», «regar plantas todos os dias» */
+function parseRep(txt){
+  let t = " " + txt + " ", rep = null;
+  const wdIdx = {domingo:0, segunda:1, "terça":2, terca:2, quarta:3, quinta:4, sexta:5, "sábado":6, sabado:6};
+  t = t.replace(/\s(todos os dias|diariamente)\s/i, () => { rep = {freq:"diaria"}; return " "; });
+  t = t.replace(/\s(?:todos os meses|mensalmente)(?:\s(?:no\s|ao\s|a\s)?dia\s(\d{1,2}))?\s/i, (_, n) => { rep = {freq:"mensal", dia:n ? Math.min(31, +n) : 0}; return " "; });
+  t = t.replace(/\s(?:todos os anos|anualmente)\s/i, () => { rep = {freq:"anual"}; return " "; });
+  t = t.replace(/\s(?:todas as semanas|semanalmente)\s/i, () => { rep = {freq:"semanal", dias:[]}; return " "; });
+  const re = /\s(?:todas as |todos os |às |as |aos )((?:(?:segunda|terça|terca|quarta|quinta|sexta|sábado|sabado|domingo)s?(?:-feiras?)?(?:,\s*|\s+e\s+)?)+)\s/i;
+  t = t.replace(re, (_, lst) => {
+    const dias = [...lst.toLowerCase().matchAll(/(segunda|terça|terca|quarta|quinta|sexta|sábado|sabado|domingo)/g)].map(m => wdIdx[m[1]]);
+    if (!dias.length) return _;
+    rep = {freq:"semanal", dias:[...new Set(dias)]}; return " ";
+  });
+  return {txt:t.trim().replace(/\s+/g, " "), rep};
+}
+function serieFields(base, rep){
+  const d = base.data || today();
+  return {t:base.t, hora:base.hora || "", prio:base.prio || "media", tag:base.tag || "", freq:rep.freq,
+    dias:rep.freq === "semanal" ? (rep.dias && rep.dias.length ? rep.dias : [pdk(d).getDay()]) : [],
+    dia:rep.freq === "mensal" ? (+rep.dia || pdk(d).getDate()) : 0, mmdd:d.slice(5)};
+}
+function criarSerie(base, rep){
+  const s = put("recorr", Object.assign(serieFields(base, rep), {desde:base.data || today()}));
+  ensureRecorr(); return s;
+}
+
+/* ---------- trocas de turno e horas extra no vencimento ---------- */
+const trocasMes = m => S.turnos.filter(x => !x.del && ym(x.id) === m && x.s !== shiftAuto(x.id)).sort((a, b) => a.id.localeCompare(b.id));
+const extrasMes = m => live("extras").filter(x => ym(x.data) === m).sort((a, b) => a.data.localeCompare(b.data));
+function mesPagamentoExtra(k){ return S.cfg.heMesSeguinte === false ? ym(k) : ym(addDays(`${ym(k)}-01`, 32)); }
+function valorHoraBase(){
+  const v = S.venc; if (!v || !v.full) return 0;
+  try{ return vencEngineDe(v.full, "base").valorHora(); }catch(e){ return 0; }
+}
+const valorHoraExtra = () => +S.cfg.heValor > 0 ? +S.cfg.heValor : r2(valorHoraBase() * 1.25);
+const valorExtra = x => +x.valor > 0 ? +x.valor : r2((+x.horas || 0) * valorHoraExtra());
+/* cópia dos dados da app Vencimentos com as trocas e horas extra feitas aqui */
+function vencAjustado(full){
+  const o = JSON.parse(JSON.stringify(full));
+  o.dias = o.dias || {}; o.meses = o.meses || {};
+  S.turnos.filter(x => !x.del).forEach(x => {
+    const auto = shiftAuto(x.id); if (x.s === auto) return;
+    const old = o.dias[x.id] || {}, n = {s:x.s};
+    if (old.f !== undefined) n.f = old.f;
+    o.dias[x.id] = n;
+  });
+  live("extras").forEach(x => {
+    const mk = mesPagamentoExtra(x.data), mm = o.meses[mk] = Object.assign({}, o.meses[mk] || {});
+    mm.extra = r2((+mm.extra || 0) + valorExtra(x));
+  });
+  return o;
+}
+const engCache = {};
+function vencEngineDe(full, tag){
+  const k = tag + "|" + JSON.stringify(full).length + "|" + (S.venc ? S.venc.upd : 0) + "|" + (tag === "base" ? "" : ajustesSig());
+  if (!engCache[tag] || engCache[tag].k !== k) engCache[tag] = {k, e:vencEngine(full)};
+  return engCache[tag].e;
+}
+const ajustesSig = () => JSON.stringify([S.turnos.filter(x => !x.del).map(x => x.id + x.s), live("extras").map(x => x.data + x.horas + (x.valor || "")), S.cfg.heValor || 0, S.cfg.heMesSeguinte]);
+function temAjustes(){ return S.turnos.some(x => !x.del && x.s !== shiftAuto(x.id)) || live("extras").length > 0; }
+/* líquido de um mês: com as alterações feitas aqui (por defeito) ou só com os dados da app Vencimentos */
+function pagamentoMes(k, semAjustes){
+  const v = S.venc; if (!v || !v.full) return null;
+  try{
+    const e = semAjustes || !temAjustes() ? vencEngineDe(v.full, "base") : vencEngineDe(vencAjustado(v.full), "aj");
+    const d = pdk(k), p = e.payment(d.getFullYear(), d.getMonth());
+    if (!p || !isFinite(p.liquido) || p.fixo <= 0) return null;
+    return p;
+  }catch(e){ return null; }
+}
+
+/* ---------- resumo semanal ---------- */
+function resumoSemana(ref = today()){
+  const seg = addDays(ref, -((pdk(ref).getDay() + 6) % 7)), dom = addDays(seg, 6);
+  const dias = Array.from({length:7}, (_, i) => addDays(seg, i));
+  const prox = Array.from({length:7}, (_, i) => addDays(seg, 7 + i));
+  const gs = live("gastos").filter(g => g.data >= seg && g.data <= dom);
+  const porCat = {}; gs.forEach(g => porCat[g.cat || "Outros"] = (porCat[g.cat || "Outros"] || 0) + (+g.valor || 0));
+  const planeados = dias.reduce((a, k) => a + treinosDoDia(k).length, 0);
+  const feitos = live("sessoes").filter(s => s.feito && s.data >= seg && s.data <= dom).length;
+  const abertas = live("tarefas").filter(x => !x.feito && (!x.data || x.data <= addDays(dom, 7)));
+  const atrasadas = abertas.filter(x => x.data && x.data < today()).length;
+  const turnos = prox.map(k => ({k, s:shiftOf(k)}));
+  const cont = {M:0, T:0, N:0}; turnos.forEach(x => { if (cont[x.s] != null) cont[x.s]++; });
+  return {seg, dom, gastos:r2(somaGastos(gs)), porCat:Object.entries(porCat).sort((a, b) => b[1] - a[1]), n:gs.length, planeados, feitos, abertas, atrasadas, turnos, cont};
+}
+const pl = (n, um, varios) => `${n} ${n === 1 ? um : varios}`;
+function dlgResumo(ref){
+  const r = resumoSemana(ref || today());
+  const f = k => `${pdk(k).getDate()} ${MESES[pdk(k).getMonth()].slice(0, 3)}`;
+  openDlg(`Resumo da semana · ${f(r.seg)} a ${f(r.dom)}`, `
+    <div class="kpis" style="grid-template-columns:repeat(auto-fit,minmax(120px,1fr))">
+      <div class="kpi inv"><div class="l">Gastos da semana</div><div class="v">${eur(r.gastos)}</div><div class="xs">${r.n} movimento${r.n === 1 ? "" : "s"}</div></div>
+      <div class="kpi"><div class="l">Treinos feitos</div><div class="v">${r.feitos}${r.planeados ? ` / ${r.planeados}` : ""}</div></div>
+      <div class="kpi"><div class="l">Tarefas por fazer</div><div class="v">${r.abertas.length}</div><div class="xs ${r.atrasadas ? "" : "muted"}" ${r.atrasadas ? 'style="color:var(--red)"' : ""}>${r.atrasadas ? r.atrasadas + " atrasadas" : "nenhuma atrasada"}</div></div>
+    </div>
+    ${r.porCat.length ? `<div class="small"><b>Onde gastaste:</b> ${r.porCat.slice(0, 4).map(([c, v]) => `${esc(c)} ${eur(v)}`).join(" · ")}</div>` : ""}
+    <div><div class="small" style="font-weight:800;margin-bottom:6px">Próxima semana · ${pl(r.cont.M, "manhã", "manhãs")}, ${pl(r.cont.T, "tarde", "tardes")}, ${pl(r.cont.N, "noite", "noites")}</div>
+      <div class="week">${r.turnos.map(x => `<div class="wd"><span class="xs">${DOW3[pdk(x.k).getDay()]} ${pdk(x.k).getDate()}</span><span class="chip ${chipCls(x.s)}">${chipTxt(x.s)}</span></div>`).join("")}</div></div>
+    ${r.abertas.length ? `<div class="list">${r.abertas.slice(0, 6).map(x => `<div class="item"><div class="grow"><div class="t">${esc(x.t)}</div><div class="s">${x.data ? relDate(x.data) : "sem data"}${x.hora ? " · " + x.hora : ""}</div></div></div>`).join("")}</div>` : ""}
+    <div style="display:flex;gap:8px;flex-wrap:wrap"><button class="btn sm" type="button" data-a="excel">${ic("download", 16)} Exportar Excel (gastos e treinos)</button></div>`, null, "", "", "Fechar");
+}
+
+/* ---------- notificações (Web Push) ---------- */
+const b64uBytes = s => { s = String(s).replace(/-/g, "+").replace(/_/g, "/"); const b = atob(s + "===".slice((s.length + 3) % 4)); return Uint8Array.from(b, c => c.charCodeAt(0)); };
+const pushSuportado = () => "serviceWorker" in navigator && "PushManager" in window && "Notification" in window;
+function pushEstado(){
+  if (!pushSuportado()) return (typeof IS_IOS !== "undefined" && IS_IOS && !IS_STANDALONE) ? "instalar" : "sem";
+  if (Notification.permission === "denied") return "negado";
+  return S.local.push && S.local.push.on && Notification.permission === "granted" ? "on" : "off";
+}
+async function swReg(){
+  if (!("serviceWorker" in navigator)) throw new Error("Este navegador não suporta notificações.");
+  if (location.protocol !== "https:") throw new Error("As notificações só funcionam na app publicada (endereço https).");
+  await navigator.serviceWorker.register("sw.js");
+  return await navigator.serviceWorker.ready;
+}
+async function ativarNotif(){
+  if (!syncOn()) return toast("Liga primeiro a sincronização (servidor e código).");
+  if (pushEstado() === "instalar") return toast("No iPhone, adiciona primeiro a app ao ecrã principal (Partilhar › Adicionar ao ecrã principal) e abre-a a partir daí.");
+  if (!pushSuportado()) return toast("Este navegador não suporta notificações.");
+  try{
+    const perm = await Notification.requestPermission();
+    if (perm !== "granted") return toast("Não deste autorização para notificações. Podes mudar isto nas definições do aparelho.");
+    const reg = await swReg();
+    const {chave} = await api("/api/push/chave");
+    let sub = await reg.pushManager.getSubscription();
+    if (sub && sub.options && sub.options.applicationServerKey){
+      const a = new Uint8Array(sub.options.applicationServerKey), b = b64uBytes(chave);
+      if (a.length !== b.length || a.some((x, i) => x !== b[i])){ await sub.unsubscribe(); sub = null; }
+    }
+    if (!sub) sub = await reg.pushManager.subscribe({userVisibleOnly:true, applicationServerKey:b64uBytes(chave)});
+    await api("/api/push/registar", {sub:sub.toJSON(), nome:(typeof IS_IOS !== "undefined" && IS_IOS) ? "iPhone" : /Mac/.test(navigator.platform) ? "Mac" : "PC"});
+    S.local.push = {on:true, endpoint:sub.endpoint}; persist(); render();
+    toast("Notificações ligadas neste aparelho.");
+  }catch(e){ toast("Não consegui ligar as notificações: " + (e.message || e)); }
+}
+async function desativarNotif(){
+  try{
+    const reg = await swReg(), sub = await reg.pushManager.getSubscription();
+    if (sub){ await api("/api/push/remover", {endpoint:sub.endpoint}).catch(() => {}); await sub.unsubscribe(); }
+  }catch(e){}
+  S.local.push = {on:false}; persist(); render(); toast("Notificações desligadas neste aparelho.");
+}
+async function testarNotif(){
+  try{ const j = await api("/api/push/teste"); toast(j.enviados ? `Notificação de teste enviada para ${j.enviados} aparelho${j.enviados > 1 ? "s" : ""}.` : "Nenhum aparelho com notificações ligadas."); }
+  catch(e){ toast("Erro: " + (e.message || e)); }
+}
+
+/* ---------- cópias de segurança ---------- */
+/* cópia local semanal (útil mesmo sem servidor) */
+function copiaLocal(){
+  try{
+    const arr = JSON.parse(localStorage.getItem("dia-copias") || "[]"), t = today();
+    if (arr[0] && pdk(t) - pdk(arr[0].data) < 7 * 864e5) return;
+    arr.unshift({data:t, v:JSON.stringify(payload())});
+    localStorage.setItem("dia-copias", JSON.stringify(arr.slice(0, 3)));
+  }catch(e){}
+}
+async function listarCopias(){
+  if (!syncOn()) return;
+  UI.copias = {busy:true, lista:(UI.copias && UI.copias.lista) || []};
+  try{ const j = await api("/api/copias"); UI.copias = {lista:j.copias || [], t:Date.now()}; }
+  catch(e){ UI.copias = {lista:[], erro:String(e.message || e), t:Date.now()}; }
+  if (route() === "definicoes") softRender();
+}
+/* repõe uma cópia: o que estava na cópia volta (mesmo se tiver sido apagado); o que é mais recente fica */
+function reporCopia(dados){
+  if (!dados || typeof dados !== "object") throw new Error("Cópia vazia.");
+  const now = Date.now();
+  Object.keys(dados).forEach(c => {
+    if (!Array.isArray(dados[c]) || c === "local") return;
+    if (!Array.isArray(S[c])) S[c] = [];
+    dados[c].forEach(x => {
+      if (!x || !x.id || x.del) return;
+      const i = S[c].findIndex(y => y.id === x.id);
+      if (i < 0 || S[c][i].del) { const n = Object.assign({}, x, {upd:now}); if (i < 0) S[c].push(n); else S[c][i] = n; }
+    });
+  });
+}
+
+/* ---------- Excel (.xlsx) sem bibliotecas externas ---------- */
+const CRC_T = (() => { const t = new Uint32Array(256); for (let n = 0; n < 256; n++){ let c = n; for (let k = 0; k < 8; k++) c = c & 1 ? 0xEDB88320 ^ (c >>> 1) : c >>> 1; t[n] = c >>> 0; } return t; })();
+function crc32(b){ let c = 0xFFFFFFFF; for (let i = 0; i < b.length; i++) c = CRC_T[(c ^ b[i]) & 255] ^ (c >>> 8); return (c ^ 0xFFFFFFFF) >>> 0; }
+function zipStore(files){
+  const enc = new TextEncoder(), parts = [], cen = []; let off = 0;
+  const u16 = v => [v & 255, (v >>> 8) & 255], u32 = v => [v & 255, (v >>> 8) & 255, (v >>> 16) & 255, (v >>> 24) & 255];
+  files.forEach(([name, txt]) => {
+    const nb = enc.encode(name), db = enc.encode(txt), crc = crc32(db);
+    const h = [...u32(0x04034b50), ...u16(20), ...u16(0x0800), ...u16(0), ...u16(0), ...u16(0x21), ...u32(crc), ...u32(db.length), ...u32(db.length), ...u16(nb.length), ...u16(0)];
+    parts.push(new Uint8Array(h), nb, db);
+    cen.push(new Uint8Array([...u32(0x02014b50), ...u16(20), ...u16(20), ...u16(0x0800), ...u16(0), ...u16(0), ...u16(0x21), ...u32(crc), ...u32(db.length), ...u32(db.length), ...u16(nb.length), ...u16(0), ...u16(0), ...u16(0), ...u16(0), ...u32(0), ...u32(off)]), nb);
+    off += h.length + nb.length + db.length;
+  });
+  const cenLen = cen.reduce((a, b) => a + b.length, 0);
+  const end = new Uint8Array([...u32(0x06054b50), ...u16(0), ...u16(0), ...u16(files.length), ...u16(files.length), ...u32(cenLen), ...u32(off), ...u16(0)]);
+  return new Blob([...parts, ...cen, end], {type:"application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"});
+}
+const xesc = s => String(s == null ? "" : s).replace(/[&<>"]/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c])).replace(/[\x00-\x08\x0B\x0C\x0E-\x1F]/g, "");
+const colL = i => { let s = ""; i++; while (i){ const r = (i - 1) % 26; s = String.fromCharCode(65 + r) + s; i = Math.floor((i - 1) / 26); } return s; };
+const xlDate = k => Math.round((Date.UTC(+k.slice(0, 4), +k.slice(5, 7) - 1, +k.slice(8, 10)) - Date.UTC(1899, 11, 30)) / 864e5);
+/* cada célula: string, número, {d:"AAAA-MM-DD"} ou {e:valor em euros} */
+function sheetXml(rows, widths){
+  const cell = (v, r, c, head) => {
+    const ref = colL(c) + (r + 1);
+    if (v == null || v === "") return "";
+    if (typeof v === "object" && v.d) return `<c r="${ref}" s="1"><v>${xlDate(v.d)}</v></c>`;
+    if (typeof v === "object" && "e" in v) return `<c r="${ref}" s="3"><v>${+v.e || 0}</v></c>`;
+    if (typeof v === "number" && isFinite(v)) return `<c r="${ref}"${head ? ' s="2"' : ""}><v>${v}</v></c>`;
+    return `<c r="${ref}" t="inlineStr"${head ? ' s="2"' : ""}><is><t xml:space="preserve">${xesc(v)}</t></is></c>`;
+  };
+  return `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><sheetViews><sheetView workbookViewId="0"><pane ySplit="1" topLeftCell="A2" activePane="bottomLeft" state="frozen"/></sheetView></sheetViews>${widths ? `<cols>${widths.map((w, i) => `<col min="${i + 1}" max="${i + 1}" width="${w}" customWidth="1"/>`).join("")}</cols>` : ""}<sheetData>${rows.map((row, r) => `<row r="${r + 1}">${row.map((v, c) => cell(v, r, c, r === 0)).join("")}</row>`).join("")}</sheetData>${rows.length > 1 ? `<autoFilter ref="A1:${colL(rows[0].length - 1)}${rows.length}"/>` : ""}</worksheet>`;
+}
+function xlsxBlob(sheets){
+  const files = [
+    ["[Content_Types].xml", `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/><Override PartName="/xl/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.styles+xml"/>${sheets.map((s, i) => `<Override PartName="/xl/worksheets/sheet${i + 1}.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>`).join("")}</Types>`],
+    ["_rels/.rels", `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/></Relationships>`],
+    ["xl/workbook.xml", `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><sheets>${sheets.map((s, i) => `<sheet name="${xesc(s.nome)}" sheetId="${i + 1}" r:id="rId${i + 1}"/>`).join("")}</sheets>${sheets.some(s => s.rows.length > 1) ? `<definedNames>${sheets.map((s, i) => s.rows.length > 1 ? `<definedName name="_xlnm._FilterDatabase" localSheetId="${i}" hidden="1">'${xesc(s.nome)}'!$A$1:$${colL(s.rows[0].length - 1)}$${s.rows.length}</definedName>` : "").join("")}</definedNames>` : ""}</workbook>`],
+    ["xl/_rels/workbook.xml.rels", `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">${sheets.map((s, i) => `<Relationship Id="rId${i + 1}" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet${i + 1}.xml"/>`).join("")}<Relationship Id="rId${sheets.length + 1}" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/></Relationships>`],
+    ["xl/styles.xml", `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><numFmts count="2"><numFmt numFmtId="164" formatCode="dd/mm/yyyy"/><numFmt numFmtId="165" formatCode="#,##0.00\\ &quot;€&quot;"/></numFmts><fonts count="2"><font><sz val="11"/><name val="Calibri"/></font><font><b/><sz val="11"/><name val="Calibri"/></font></fonts><fills count="2"><fill><patternFill patternType="none"/></fill><fill><patternFill patternType="gray125"/></fill></fills><borders count="1"><border><left/><right/><top/><bottom/><diagonal/></border></borders><cellStyleXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0"/></cellStyleXfs><cellXfs count="4"><xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0"/><xf numFmtId="164" fontId="0" fillId="0" borderId="0" xfId="0" applyNumberFormat="1"/><xf numFmtId="0" fontId="1" fillId="0" borderId="0" xfId="0" applyFont="1"/><xf numFmtId="165" fontId="0" fillId="0" borderId="0" xfId="0" applyNumberFormat="1"/></cellXfs><cellStyles count="1"><cellStyle name="Normal" xfId="0" builtinId="0"/></cellStyles></styleSheet>`]
+  ];
+  sheets.forEach((s, i) => files.push([`xl/worksheets/sheet${i + 1}.xml`, sheetXml(s.rows, s.widths)]));
+  return zipStore(files);
+}
+function folhasExcel(){
+  const ORIG = {ia:"IA", fixo:"Despesa fixa", applepay:"Apple Pay", auto:"Automático", gmail:"Gmail", manual:"Manual"};
+  const gastos = live("gastos").slice().sort((a, b) => a.data.localeCompare(b.data));
+  const g = [["Data","Descrição","Categoria","Valor","Origem"]].concat(gastos.map(x => [{d:x.data}, x.desc || "", x.cat || "", {e:+x.valor || 0}, ORIG[x.origem] || x.origem || "Manual"]));
+  const meses = {}; gastos.forEach(x => { const k = ym(x.data) + "|" + (x.cat || "Outros"); meses[k] = (meses[k] || 0) + (+x.valor || 0); });
+  const gm = [["Mês","Categoria","Total","Orçamento"]].concat(Object.keys(meses).sort().map(k => { const [m, c] = k.split("|"); return [m, c, {e:r2(meses[k])}, +(S.cfg.orc || {})[c] ? {e:+S.cfg.orc[c]} : ""]; }));
+  const tr = [["Data","Treino","Exercício","Série","Repetições","Kg","Concluído"]];
+  live("sessoes").slice().sort((a, b) => a.data.localeCompare(b.data)).forEach(s => {
+    const p = byId("treinos", s.treinoId); if (!p) return;
+    (p.ex || []).forEach((e, i) => {
+      const reps = repsSeries(e), sets = s.sets && s.sets[i] ? s.sets[i] : (s.kg && s.kg[i] != null ? [s.kg[i]] : []);
+      if (!sets.some(v => v != null && v !== "")) return;
+      sets.forEach((v, j) => { if (v == null || v === "") return; tr.push([{d:s.data}, p.nome, e.n, j + 1, pnum(reps[j]) || reps[j] || "", +v, s.feito ? "Sim" : ""]); });
+    });
+  });
+  return [{nome:"Gastos", rows:g, widths:[12, 32, 18, 12, 14]}, {nome:"Gastos por mês", rows:gm, widths:[10, 20, 12, 12]}, {nome:"Treinos", rows:tr, widths:[12, 24, 26, 7, 11, 8, 11]}];
+}
+function exportarExcel(){
+  const blob = xlsxBlob(folhasExcel());
+  const a = document.createElement("a"); a.href = URL.createObjectURL(blob); a.download = `dia-gastos-e-treinos-${today()}.xlsx`;
+  document.body.appendChild(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(a.href), 4000);
+  S.local.ultimoExcel = Date.now(); persist();
+  toast("Excel exportado.");
+}
+
+/* ============================================================
    dia. — ecrãs
    ============================================================ */
 const IC = {
@@ -830,6 +1186,10 @@ const IC = {
   plus:'<path d="M12 5v14M5 12h14"/>', drop:'<path d="M12 3s6 6.5 6 11a6 6 0 0 1-12 0c0-4.5 6-11 6-11z"/>',
   mic:'<rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5 11a7 7 0 0 0 14 0M12 18v3"/>',
   google:'<path d="M21 12.2c0-.7-.1-1.3-.2-1.9H12v3.6h5.1a4.4 4.4 0 0 1-1.9 2.9v2.4h3.1c1.8-1.7 2.7-4.1 2.7-7z"/><path d="M12 21.5c2.6 0 4.7-.9 6.3-2.3l-3.1-2.4c-.9.6-2 .9-3.2.9-2.5 0-4.6-1.7-5.3-3.9H3.5v2.5A9.5 9.5 0 0 0 12 21.5z"/>',
+  alert:'<path d="M12 3l9.5 16.5H2.5z"/><path d="M12 10v4M12 17.5v.01"/>',
+  bell:'<path d="M6 16V11a6 6 0 0 1 12 0v5l1.5 2h-15z"/><path d="M10 20.5a2 2 0 0 0 4 0"/>',
+  download:'<path d="M12 4v11M7 10l5 5 5-5"/><path d="M4 17v2a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-2"/>',
+  repeat:'<path d="M4 11V9a3 3 0 0 1 3-3h12M16 3l3 3-3 3"/><path d="M20 13v2a3 3 0 0 1-3 3H5M8 21l-3-3 3-3"/>',
   cal:'<rect x="3" y="4" width="18" height="17" rx="2"/><path d="M3 9h18M8 2v4M16 2v4M8 14h3"/>'
 };
 const ic = (n, s = 20, sw = 2) => `<svg width="${s}" height="${s}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="${sw}" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${IC[n]}</svg>`;
@@ -1042,6 +1402,10 @@ function vHoje(){
     <div class="now">${nowHtml}</div>
   </section>
 
+  ${isT ? avisosHtml() : ""}
+  ${isT && (pdk(t).getDay() === 0 || (pdk(t).getDay() === 1 && h < 12)) ? (() => { const r = resumoSemana(pdk(t).getDay() === 1 ? addDays(t, -1) : t); return `<section class="card acc" style="flex-direction:row;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:12px" aria-label="Resumo da semana">
+    <div><div class="eyebrow">Resumo da semana</div><div class="mid">${eur0(r.gastos)} gastos · ${r.feitos} treino${r.feitos === 1 ? "" : "s"} · ${r.abertas.length} tarefa${r.abertas.length === 1 ? "" : "s"} por fazer</div><div class="small" style="font-weight:600">Próxima semana: ${pl(r.cont.M, "manhã", "manhãs")}, ${pl(r.cont.T, "tarde", "tardes")}, ${pl(r.cont.N, "noite", "noites")}</div></div>
+    <button class="btn" type="button" data-a="resumo" data-k="${pdk(t).getDay() === 1 ? addDays(t, -1) : t}" style="background:#16161A;color:#fff">Ver resumo</button></section>`; })() : ""}
   ${isT && inbox.length ? `<section class="inbox-row" aria-label="Entrou sozinho">
     <b class="small">Entrou sozinho</b>
     ${inbox.slice(0, 6).map(x => `<span class="pill">${esc(itemTitle(x.dados || {}))} <span class="xs muted">${esc(x.origem || "")}</span>
@@ -1094,9 +1458,15 @@ function macrosHtml(tot){
   </div>`;
 }
 const prioN = x => ({alta:0, media:1, baixa:2})[x.prio || "media"];
+function seriesCard(){
+  const ss = live("recorr").sort((a, b) => a.t.localeCompare(b.t));
+  return `<section class="card"><div class="card-head"><h2>Tarefas que se repetem</h2><button class="btn sm" type="button" data-a="add-serie">+ Nova</button></div>
+    <div class="list">${ss.map(r => `<div class="item"><span style="color:var(--violet)">${ic("repeat", 18)}</span><div class="grow"><div class="t">${esc(r.t)}</div><div class="s">${esc(repTexto(r))}${r.hora ? " · " + r.hora : ""}${r.tag ? " · #" + esc(r.tag) : ""}</div></div>
+      <button class="linkbtn" type="button" data-a="edit-serie" data-id="${r.id}">Editar</button><button class="x" type="button" data-a="parar-serie" data-id="${r.id}" aria-label="Deixar de repetir ${esc(r.t)}">${ic("x", 16)}</button></div>`).join("") || '<div class="empty">Ex.: «Pagar a luz» todos os meses no dia 8, «Lixo» às terças.</div>'}</div></section>`;
+}
 function taskRow(x, compact){
   const t = today(), late = x.data && x.data < t && !x.feito;
-  const sub = [x.data ? (late ? "Atrasada · " : "") + relDate(x.data) : "", x.hora, x.tag ? "#" + x.tag : "", x.rep ? "repete " + {diaria:"todos os dias", semanal:"todas as semanas", mensal:"todos os meses"}[x.rep] : "", x.origem === "ia" ? "criada pela IA" : ""].filter(Boolean).join(" · ");
+  const sub = [x.data ? (late ? "Atrasada · " : "") + relDate(x.data) : "", x.hora, x.tag ? "#" + x.tag : "", x.serie ? "↻ " + (repTexto(byId("recorr", x.serie)) || "repete") : x.rep ? "repete " + {diaria:"todos os dias", semanal:"todas as semanas", mensal:"todos os meses"}[x.rep] : "", x.origem === "ia" ? "criada pela IA" : ""].filter(Boolean).join(" · ");
   return `<div class="item ${x.feito ? "done" : ""}">
     <input class="check" type="checkbox" data-c="task-done" data-id="${x.id}" ${x.feito ? "checked" : ""} aria-label="Concluir: ${esc(x.t)}">
     <div class="grow"><div class="t">${esc(x.t)}</div>${sub ? `<div class="s" ${late ? 'style="color:var(--red)"' : ""}>${esc(sub)}</div>` : ""}</div>
@@ -1119,7 +1489,9 @@ function vTarefas(){
     const done = all.filter(x => x.feito).sort((a, b) => (b.feitoEm || b.upd) - (a.feitoEm || a.upd)).slice(0, 60);
     body = done.map(x => taskRow(x)).join("") || '<div class="empty">Ainda não concluíste tarefas.</div>';
   } else {
-    const open = all.filter(x => !x.feito).sort((a, b) => (a.data || "9999").localeCompare(b.data || "9999") || (a.hora || "99").localeCompare(b.hora || "99") || prioN(a) - prioN(b));
+    /* nas tarefas que se repetem, mostra só a próxima vez (para não encher a lista) */
+    const vistas = new Set();
+    const open = all.filter(x => !x.feito).sort((a, b) => (a.data || "9999").localeCompare(b.data || "9999")).filter(x => { if (!x.serie || !x.data || x.data <= addDays(t, 1)) return true; if (vistas.has(x.serie)) return false; vistas.add(x.serie); return true; }).sort((a, b) => (a.data || "9999").localeCompare(b.data || "9999") || (a.hora || "99").localeCompare(b.hora || "99") || prioN(a) - prioN(b));
     const groups = [
       ["Atrasadas", open.filter(x => x.data && x.data < t), "red"],
       [`Hoje${isWork(shiftOf(t)) ? " · turno " + shiftOf(t) + " " + S.cfg.horas[shiftOf(t)].join("–") : ""}`, open.filter(x => x.data === t)],
@@ -1138,7 +1510,8 @@ function vTarefas(){
         <button class="btn" type="submit">Adicionar</button>
       </form>
       <section class="card" style="gap:0">${body}</section>
-      <p class="xs muted" style="margin:0">Dica: escreve «hoje», «amanhã», um dia da semana, uma data (12/11), uma hora (10h ou 10:30), #etiqueta e «!» para prioridade alta.</p>
+      ${seriesCard()}
+      <p class="xs muted" style="margin:0">Dica: escreve «hoje», «amanhã», um dia da semana, uma data (12/11), uma hora (10h ou 10:30), #etiqueta e «!» para prioridade alta. Para repetir: «lixo todas as terças», «pagar luz todos os meses dia 8», «tomar vitaminas todos os dias 9h».</p>
     </div>
     ${side}
   </div>`;
@@ -1193,6 +1566,28 @@ function tarefasCalendario(){
 }
 
 /* ---------- HORÁRIO ---------- */
+function ajustesCard(m){
+  const tr = trocasMes(m), ex = extrasMes(m), v = S.venc && S.venc.full;
+  const mn = ym(addDays(`${m}-01`, 32)), nomeM = x => MESES[+x.slice(5) - 1];
+  let efeito = "";
+  if (v){
+    const linhas = [m, mn].map(x => { const a = pagamentoMes(`${x}-01`), b = pagamentoMes(`${x}-01`, true); return a && b ? {x, liq:a.liquido, dif:r2(a.liquido - b.liquido)} : null; }).filter(Boolean);
+    efeito = linhas.map(l => `<div class="item"><div class="grow"><div class="t">Líquido previsto de ${nomeM(l.x)}</div><div class="s">${l.dif ? `${l.dif > 0 ? "+" : "−"}${eur(Math.abs(l.dif))} com as alterações` : "sem efeito das alterações"}</div></div><b class="small" style="${l.dif > 0 ? "color:var(--green)" : l.dif < 0 ? "color:var(--red)" : ""}">${eur(l.liq)}</b></div>`).join("");
+  }
+  const hTot = ex.reduce((a, x) => a + (+x.horas || 0), 0), vTot = ex.reduce((a, x) => a + valorExtra(x), 0);
+  return `<section class="card" aria-label="Trocas e horas extra">
+    <div class="card-head"><h2>Trocas e horas extra</h2><span class="xs muted">${nomeM(m)}</span></div>
+    <div style="display:flex;gap:8px;flex-wrap:wrap"><button class="btn sm" type="button" data-a="add-troca">${ic("repeat", 16)} Troca de turno</button><button class="btn sm ghost" type="button" data-a="add-extra">+ Horas extra</button></div>
+    <div class="list">
+      ${tr.map(x => `<div class="item"><span class="chip ${chipCls(shiftAuto(x.id))}" style="padding:1px 6px">${chipTxt(shiftAuto(x.id))}</span>→<span class="chip ${chipCls(x.s)}" style="padding:1px 6px">${chipTxt(x.s)}</span><div class="grow"><div class="t">${shortDate(x.id)}</div><div class="s">${x.com ? "Troca com " + esc(x.com) : "Turno alterado"}${x.nota ? " · " + esc(x.nota) : ""}</div></div><button class="x" type="button" data-a="del-troca" data-k="${x.id}" aria-label="Desfazer troca de ${shortDate(x.id)}">${ic("x", 16)}</button></div>`).join("")}
+      ${ex.map(x => `<div class="item"><b class="small" style="width:44px">${num(x.horas)} h</b><div class="grow"><div class="t">${shortDate(x.data)}</div><div class="s">${esc(x.nota || "Horas extra")} · pago em ${nomeM(mesPagamentoExtra(x.data))}</div></div><span class="amount">${v || +x.valor ? eur(valorExtra(x)) : ""}</span><button class="linkbtn" type="button" data-a="edit-extra" data-id="${x.id}">Editar</button><button class="x" type="button" data-a="del" data-col="extras" data-id="${x.id}" aria-label="Apagar horas extra">${ic("x", 16)}</button></div>`).join("")}
+      ${!tr.length && !ex.length ? '<div class="empty">Sem trocas nem horas extra neste mês.</div>' : ""}
+    </div>
+    ${ex.length ? `<span class="small" style="font-weight:700">${num(hTot)} h extra${v ? ` · ${eur(vTot)}` : ""}</span>` : ""}
+    ${v ? (efeito ? `<div class="list" style="border-top:1px solid var(--line);padding-top:6px">${efeito}</div>` : "") : `<span class="xs muted">Liga a app Vencimentos para veres o efeito no vencimento líquido.</span>`}
+    ${v ? `<span class="xs muted">Hora extra a ${eur(valorHoraExtra())}${+S.cfg.heValor > 0 ? "" : " (valor-hora + 25 %)"} · paga ${S.cfg.heMesSeguinte === false ? "no próprio mês" : "no mês seguinte"}. Muda em Definições › App Vencimentos.</span>` : ""}
+  </section>`;
+}
 function vHorario(){
   const t = today();
   if (!UI.horMes) UI.horMes = ym(t);
@@ -1235,6 +1630,7 @@ function vHorario(){
       <div class="legend"><span><b style="color:var(--amber-ink)">M</b> ${S.cfg.horas.M.join("–")}</span><span><b style="color:var(--sky-ink)">T</b> ${S.cfg.horas.T.join("–")}</span><span><b style="color:var(--violet-ink)">N</b> ${S.cfg.horas.N.join("–")}</span><span><b style="color:var(--green)">F</b> férias</span><span>— folga</span><span style="color:var(--red);font-weight:700">contorno vermelho = feriado</span><span>• alterado aqui</span></div>
     </section>
     <div class="side-col">
+      ${ajustesCard(UI.horMes)}
       <section class="card">
         <div class="card-head"><h2>Compromissos do mês</h2><button class="btn sm" type="button" data-a="add-evento">+ Novo</button></div>
         <div class="list">${monthEvs.map(e => `<div class="item"><div class="grow"><div class="t">${esc(e.t)}${e.origem === "google" ? ' <span class="chip c-x">Google</span>' : ""}</div><div class="s">${shortDate(e.data)}${e.hora ? " · " + e.hora : ""}${e.local ? " · " + esc(e.local) : ""}</div></div><button class="x" type="button" data-a="del" data-col="eventos" data-id="${e.id}" aria-label="Apagar compromisso">${ic("x", 16)}</button></div>`).join("") || '<div class="empty">Sem compromissos este mês.</div>'}</div>
@@ -1397,8 +1793,11 @@ function vGastos(){
       <div class="eyebrow">${cur ? "Este mês" : MESES[Mo - 1]}</div>
       <div class="mid" style="font-size:30px">${neg ? `Já gastaste mais ${eur0(-d.disp)} do que o vencimento` : `Tens ${eur(d.disp)} para gastar até ao fim do mês`}</div>
       <div class="small" style="font-weight:600">Vencimento líquido de ${MESES[Mo - 1]} ${eur(d.liquido)} − gastos ${eur(d.gastos)}${d.poupanca ? ` − poupança ${eur(d.poupanca)}` : ""}${cur && left > 0 && !neg ? ` · cerca de ${eur(d.disp / left)} por dia` : ""}</div>
-      <div class="xs" style="opacity:.75">Valor calculado com as regras e tabelas de IRS da app Vencimentos.</div>
+      ${cur ? (() => { const pv = previsaoMes(); return `<div class="small" style="font-weight:800;border-top:1px solid rgba(0,0,0,.12);padding-top:8px">Ao ritmo atual vais acabar o mês com ${pv.fim >= 0 ? eur(pv.fim) : "menos " + eur(-pv.fim)}.<span style="font-weight:600"> Previsão de gastos: ${eur(pv.gastos)}${pv.poup ? ` · poupança ${eur(pv.poup)}` : ""}${pv.cedo ? " (ainda é cedo no mês, a previsão vai acertando)" : ""}.</span></div>`; })() : ""}
+      <div class="xs" style="opacity:.75">Valor calculado com as regras e tabelas de IRS da app Vencimentos${temAjustes() ? ", com as trocas de turno e horas extra registadas no Horário" : ""}.</div>
     </section>`; })()}
+  ${cur && !vencMes(t) ? (() => { const pv = previsaoMes(); return orcTotal() ? `<section class="card" style="gap:6px"><div class="eyebrow">Previsão</div><div class="mid">Ao ritmo atual vais acabar o mês com ${pv.fim >= 0 ? eur(pv.fim) : "menos " + eur(-pv.fim)} do orçamento.</div><span class="small muted">Previsão de gastos: ${eur(pv.gastos)} de ${eur0(orcTotal())}.</span></section>` : ""; })() : ""}
+  ${cur ? avisosHtml() : ""}
   <div class="kpis">
     <div class="kpi inv"><div class="l">Gasto no mês</div><div class="v">${eur(tot)}</div><div class="xs">${orc ? `de ${eur0(orc)} de orçamento` : "sem orçamento definido"}</div></div>
     <div class="kpi"><div class="l">Orçamento disponível</div><div class="v" style="color:${disp < 0 ? "var(--red)" : "var(--green)"}">${eur(disp)}</div><div class="xs muted">${cur && left > 0 && disp > 0 ? `≈ ${eur(disp / left)} por dia` : ""}</div></div>
@@ -1424,7 +1823,7 @@ function vGastos(){
       ${poupCard()}
       <section class="card">
         <div class="card-head"><h2>Despesas fixas</h2><button class="btn sm" type="button" data-a="edit-fixo">+ Fixa</button></div>
-        <span class="xs muted">Entram sozinhas em Gastos no dia de cada mês.</span>
+        <span class="xs muted">Entram sozinhas em Gastos no dia de cada mês. Recebes um aviso ${avisos().fixosDias} dia${avisos().fixosDias == 1 ? "" : "s"} antes (muda em Definições › Notificações).</span>
         <div class="list">${live("fixos").sort((a, b) => (+a.dia) - (+b.dia)).map(f => `<div class="item"><div class="grow"><div class="t">${esc(f.desc)}</div><div class="s">Dia ${esc(f.dia)} · ${esc(f.cat)}</div></div><span class="amount">${eur(f.valor)}</span><button class="linkbtn" type="button" data-a="edit-fixo" data-id="${f.id}">Editar</button><button class="x" type="button" data-a="del" data-col="fixos" data-id="${f.id}" aria-label="Apagar despesa fixa">${ic("x", 16)}</button></div>`).join("") || '<div class="empty">Renda, luz, internet, ginásio…</div>'}</div>
       </section>
     </div>
@@ -1467,8 +1866,11 @@ function vDef(){
       ${(() => { const vm = vencMes(); return vm ? `<div class="small">Vencimento líquido de ${MESES[new Date().getMonth()]}: <b>${eur(vm.liquido)}</b> <span class="muted">(bruto ${eur(vm.bruto)} · IRS ${eur(vm.irs)} · SS ${eur(vm.ss)})</span></div>` : (v && !v.full ? `<div class="small" style="color:var(--amber-ink);font-weight:700">Importa outra vez a cópia da app Vencimentos para a app passar a saber o teu vencimento líquido.</div>` : ""); })()}
       <span class="small muted">${v ? `Horário vindo de: ${esc(v.fonte)} · atualizado ${new Date(v.upd).toLocaleString("pt-PT")}. ${v.rot.padrao ? `Rotação ${esc(v.rot.padrao)} desde ${esc(v.rot.inicio)}.` : ""}` : "Se esta app estiver no mesmo endereço da app Vencimentos (ex.: ricardojsilva11-art.github.io), o horário é lido sozinho sempre que abres a app. Noutro endereço, importa a cópia de segurança da app Vencimentos."}</span>
       <div style="display:flex;gap:8px;flex-wrap:wrap"><button class="btn sm" type="button" data-a="venc-import">Importar cópia da app Vencimentos</button>${v ? '<button class="btn sm ghost" type="button" data-a="venc-off">Desligar</button>' : ""}</div>
+      ${v && v.full ? `<div class="fields"><label class="field">Valor da hora extra (€)<input inputmode="decimal" data-c="cfg-num" data-k="heValor" value="${+c.heValor > 0 ? esc(num(c.heValor, 2)) : ""}" placeholder="${esc(num(r2(valorHoraBase() * 1.25), 2))} (automático)"></label></div>
+      <label class="item" style="border:0;min-height:40px"><input class="check" type="checkbox" data-c="cfg-bool" data-k="heMesSeguinte" ${c.heMesSeguinte !== false ? "checked" : ""}> <span class="small" style="font-weight:700">Horas extra pagas no mês seguinte</span></label>` : ""}
     </section>
 
+    ${notifCard()}
     <section class="card">
       <h2>Horas dos turnos</h2>
       <div class="fields">${["M","T","N"].map(s => `<label class="field">Início ${s}<input type="time" data-c="hora" data-s="${s}" data-i="0" value="${esc(c.horas[s][0])}"></label><label class="field">Fim ${s}<input type="time" data-c="hora" data-s="${s}" data-i="1" value="${esc(c.horas[s][1])}"></label>`).join("")}</div>
@@ -1516,13 +1918,42 @@ function vDef(){
       <div style="display:flex;gap:8px;flex-wrap:wrap"><button class="btn sm" type="button" data-a="gscript">${ic("google", 16)} Copiar script</button></div>` : `<span class="small" style="font-weight:700">Liga primeiro a sincronização acima.</span>`}
     </section>
 
+    ${copiasCard()}
     <section class="card">
-      <h2>Cópia de segurança</h2>
+      <h2>Cópia de segurança em ficheiro</h2>
       <span class="small muted">Guarda tudo num ficheiro ou repõe a partir de um ficheiro.</span>
       <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center"><span class="small">Versão da app: <b>${APP_VERSION}</b></span><button class="btn sm ghost" type="button" data-a="atualizar">Procurar atualização</button></div>
       <div style="display:flex;gap:8px;flex-wrap:wrap"><button class="btn sm" type="button" data-a="export">Exportar cópia</button><button class="btn sm ghost" type="button" data-a="import">Importar cópia</button><button class="btn sm danger" type="button" data-a="wipe">Apagar dados deste aparelho</button></div>
     </section>
   </div>`;
+}
+
+function notifCard(){
+  const a = avisos(), st = pushEstado(), on = st === "on";
+  const lbl = {on:"Ligadas neste aparelho", off:"Desligadas neste aparelho", negado:"Bloqueadas", instalar:"Instala a app", sem:"Não suportado"}[st];
+  const n = (k, l, suf, w) => `<label class="field">${l}<span style="display:flex;align-items:center;gap:6px"><input inputmode="numeric" data-c="aviso" data-k="${k}" value="${esc(a[k])}" style="width:${w || 70}px"> <span class="small muted">${suf}</span></span></label>`;
+  return `<section class="card">
+    <div class="card-head"><h2>Notificações e avisos</h2><span class="chip ${on ? "c-ok" : "c-x"}">${lbl}</span></div>
+    <span class="small muted">${st === "instalar" ? "No iPhone, as notificações só funcionam com a app no ecrã principal: no Safari carrega em Partilhar › Adicionar ao ecrã principal e abre a app a partir do ícone." : st === "negado" ? "As notificações estão bloqueadas para esta app. Ativa-as nas definições do aparelho (iPhone: Definições › Notificações › dia.)." : "Lembretes das tarefas com hora, início do turno, pagamentos fixos, orçamento e resumo de domingo. Liga em cada aparelho onde os queres receber."}</span>
+    <div style="display:flex;gap:8px;flex-wrap:wrap">${on ? `<button class="btn sm" type="button" data-a="notif-test">Enviar teste</button><button class="btn sm ghost" type="button" data-a="notif-off">Desligar neste aparelho</button>` : st === "off" ? `<button class="btn sm acc" type="button" data-a="notif-on" ${syncOn() ? "" : "disabled"}>${ic("bell", 16)} Ligar notificações</button>` : ""}</div>
+    ${!syncOn() ? '<span class="xs" style="font-weight:700">Liga primeiro a sincronização.</span>' : UI.ping && !UI.ping.erro && !UI.ping.push ? '<span class="small" style="color:var(--red);font-weight:700">O servidor ainda tem o código antigo: atualiza o worker.js no Cloudflare e junta o Cron Trigger «*/5 * * * *» (vê o LEIA-ME, secção 8).</span>' : ""}
+    <div class="fields">${n("tarefas", "Tarefas com hora", "min antes")}${n("turno", "Início do turno", "min antes")}${n("fixosDias", "Pagamentos fixos", "dias antes")}</div>
+    <label class="item" style="border:0;min-height:40px"><input class="check" type="checkbox" data-c="aviso-bool" data-k="orc" ${a.orc ? "checked" : ""}> <span class="small" style="font-weight:700">Avisar quando uma categoria chega aos 90 % do orçamento</span></label>
+    <label class="item" style="border:0;min-height:40px"><input class="check" type="checkbox" data-c="aviso-bool" data-k="resumo" ${a.resumo ? "checked" : ""}> <span class="small" style="font-weight:700">Resumo semanal ao domingo às</span> <input type="time" data-c="aviso-hora" value="${esc(a.resumoHora)}" style="width:130px" class="input"></label>
+    <span class="xs muted">Põe 0 para desligar um lembrete. Os avisos aparecem sempre na página Hoje, mesmo sem notificações.</span>
+  </section>`;
+}
+function copiasCard(){
+  if (syncOn() && (!UI.copias || (!UI.copias.busy && Date.now() - (UI.copias.t || 0) > 120000))) setTimeout(listarCopias, 0);
+  const l = (UI.copias && UI.copias.lista) || [];
+  return `<section class="card">
+    <div class="card-head"><h2>Cópias automáticas</h2><span class="chip ${l.length ? "c-ok" : "c-x"}">${l.length ? l.length + " guardadas" : "—"}</span></div>
+    <span class="small muted">${syncOn() ? "Todos os domingos o servidor guarda uma cópia de tudo (ficam as últimas 8 semanas). Se apagares alguma coisa por engano, repõe uma cópia: o que lá estava volta e o que é mais recente fica." : "Liga a sincronização para teres cópias semanais guardadas no servidor."}</span>
+    ${UI.copias && UI.copias.erro ? `<span class="small" style="color:var(--red)">${esc(UI.copias.erro)}</span>` : ""}
+    ${l.length ? `<div class="list">${l.map(c => `<div class="item"><div class="grow"><div class="t">${longDate(c.data)}</div><div class="s">${num((c.tam || 0) / 1024, 0)} KB</div></div><button class="linkbtn" type="button" data-a="copia-repor" data-k="${c.data}">Repor</button></div>`).join("")}</div>` : ""}
+    <div style="display:flex;gap:8px;flex-wrap:wrap">${syncOn() ? '<button class="btn sm ghost" type="button" data-a="copia-fazer">Fazer cópia agora</button>' : ""}<button class="btn sm" type="button" data-a="excel">${ic("download", 16)} Exportar Excel (gastos e treinos)</button></div>
+    ${S.local.ultimoExcel ? `<span class="xs muted">Último Excel exportado neste aparelho: ${new Date(S.local.ultimoExcel).toLocaleString("pt-PT")}</span>` : ""}
+  </section>`;
 }
 
 /* ---------- POUPANÇA ---------- */
@@ -1710,12 +2141,53 @@ function dlgGasto(g = {}){
   o => { const v = pnum(o.valor); if (!v) throw new Error("Indica o valor."); put("gastos", {id:g.id, valor:v, data:o.data, desc:o.desc.trim(), cat:o.cat, origem:g.origem || "manual"}); save(); render(); toast("Gasto guardado."); });
 }
 function dlgTarefa(x = {}){
-  openDlg(x.id ? "Editar tarefa" : "Nova tarefa", `<label class="field">Tarefa<input name="t" required value="${esc(x.t || "")}"></label>
-    <div class="fields"><label class="field">Data<input type="date" name="data" value="${esc(x.data || "")}"></label><label class="field">Hora<input type="time" name="hora" value="${esc(x.hora || "")}"></label></div>
+  const r = x.serie ? byId("recorr", x.serie) : null, freq = r && !r.del ? r.freq : (x.rep || "");
+  const d0 = x.data || (r && r.desde) || diaSel(), dias = r && r.dias && r.dias.length ? r.dias : [pdk(d0).getDay()];
+  const titulo = x._soSerie ? "Tarefa que se repete" : x.id ? "Editar tarefa" : "Nova tarefa";
+  openDlg(titulo, `<label class="field">Tarefa<input name="t" required value="${esc(x.t || "")}"></label>
+    <div class="fields"><label class="field">${x._soSerie ? "A partir de" : "Data"}<input type="date" name="data" value="${esc(x.data || (x._soSerie ? d0 : ""))}"></label><label class="field">Hora<input type="time" name="hora" value="${esc(x.hora || "")}"></label></div>
     <div class="fields"><label class="field">Prioridade<select name="prio">${opt([["alta","Alta"],["media","Normal"],["baixa","Baixa"]], x.prio || "media")}</select></label>
-    <label class="field">Repetir<select name="rep">${opt([["","Não repete"],["diaria","Todos os dias"],["semanal","Todas as semanas"],["mensal","Todos os meses"]], x.rep || "")}</select></label></div>
+    <label class="field">Repetir<select name="rep" data-c="rep-sel">${opt([["","Não repete"],["diaria","Todos os dias"],["semanal","Todas as semanas"],["mensal","Todos os meses"],["anual","Todos os anos"]], freq)}</select></label></div>
+    <fieldset class="field rep-w" style="border:0;padding:0;margin:0" ${freq === "semanal" ? "" : "hidden"}><legend style="margin-bottom:6px">Em que dias</legend><div style="display:flex;gap:6px;flex-wrap:wrap">${[1,2,3,4,5,6,0].map(d => `<label class="btn sm ghost" style="gap:6px"><input type="checkbox" name="rdias" value="${d}" ${dias.includes(d) ? "checked" : ""}> ${DOW3[d]}</label>`).join("")}</div></fieldset>
+    <label class="field rep-m" ${freq === "mensal" ? "" : "hidden"}>Dia do mês<input name="rdia" inputmode="numeric" value="${esc((r && r.dia) || pdk(d0).getDate())}"></label>
+    ${r && !r.del && !x._soSerie ? `<span class="xs muted">↻ Faz parte de uma tarefa que se repete (${esc(repTexto(r))}). As alterações ao texto, hora e repetição passam para as próximas vezes.</span>` : ""}
     <label class="field">Etiqueta<input name="tag" value="${esc(x.tag || "")}" placeholder="casa, trabalho, finanças…"></label>`,
-  o => { put("tarefas", {id:x.id, t:o.t.trim(), data:o.data, hora:o.hora, prio:o.prio, rep:o.rep, tag:o.tag.replace(/^#/, "").trim(), feito:!!x.feito}); save(); render(); });
+  o => {
+    const base = {t:o.t.trim(), data:o.data, hora:o.hora, prio:o.prio, tag:o.tag.replace(/^#/, "").trim()};
+    const rep = o.rep ? {freq:o.rep, dias:[].concat(o.rdias || []).map(Number), dia:Math.min(31, Math.max(1, Math.round(pnum(o.rdia)) || pdk(o.data || today()).getDate()))} : null;
+    const temSerie = r && !r.del;
+    if (x._soSerie){
+      if (!rep){ pararSerie(x.serie); toast("Deixou de se repetir."); }
+      else { const n = put("recorr", Object.assign({id:x.serie}, serieFields(base, rep), {desde:o.data || r.desde})); atualizarSerie(n); ensureRecorr(); }
+    } else if (temSerie){
+      put("tarefas", Object.assign({id:x.id, feito:!!x.feito}, base));
+      if (!rep){ pararSerie(x.serie); put("tarefas", {id:x.id, serie:""}); toast("Deixou de se repetir."); }
+      else { const n = put("recorr", Object.assign({id:x.serie}, serieFields(base, rep))); atualizarSerie(n); ensureRecorr(); }
+    } else if (rep){
+      if (x.id){ const n = put("recorr", Object.assign(serieFields(base, rep), {desde:base.data || today()})); put("tarefas", Object.assign({id:x.id, feito:!!x.feito, rep:"", serie:n.id}, base)); ensureRecorr(); }
+      else criarSerie(base, rep);
+      toast("Vai repetir " + repTexto(Object.assign({}, serieFields(base, rep))) + ".");
+    } else put("tarefas", Object.assign({id:x.id, feito:!!x.feito, rep:""}, base));
+    save(); render();
+  });
+}
+function dlgTroca(k){
+  const d = k || diaSel(), own = S.turnos.find(x => x.id === d && !x.del);
+  openDlg("Troca de turno", `<div class="fields"><label class="field">Dia<input type="date" name="data" required value="${esc(d)}"></label>
+    <label class="field">Passa a ser<select name="s">${opt([["M","Manhã · " + S.cfg.horas.M.join("–")],["T","Tarde · " + S.cfg.horas.T.join("–")],["N","Noite · " + S.cfg.horas.N.join("–")],["-","Folga"],["F","Férias"]], own ? own.s : "M")}</select></label></div>
+    <label class="field">Troca com (opcional)<input name="com" value="${esc((own && own.com) || "")}" placeholder="Nome do colega"></label>
+    <label class="field">Nota (opcional)<input name="nota" value="${esc((own && own.nota) || "")}"></label>
+    <span class="xs muted">O turno original vem da app Vencimentos. O efeito no vencimento líquido aparece no Horário e em Gastos.</span>`,
+  o => { if (!o.data) throw new Error("Escolhe o dia."); put("turnos", {id:o.data, s:o.s, com:o.com.trim(), nota:o.nota.trim()}); save(); render(); toast(`Troca guardada: ${shortDate(o.data)} passa a ${shiftLabel(o.s).toLowerCase()}.`); });
+}
+function dlgExtra(x = {}){
+  const vh = valorHoraExtra();
+  openDlg(x.id ? "Editar horas extra" : "Horas extra", `<div class="fields"><label class="field">Dia<input type="date" name="data" required value="${esc(x.data || diaSel())}"></label>
+    <label class="field">Horas<input name="horas" inputmode="decimal" required value="${x.horas != null ? esc(num(x.horas, 2)) : ""}" placeholder="Ex.: 2,5"></label></div>
+    <label class="field">Valor total (€, opcional)<input name="valor" inputmode="decimal" value="${+x.valor > 0 ? esc(num(x.valor, 2)) : ""}" placeholder="${vh ? "Automático: " + esc(num(vh, 2)) + " € por hora" : "Ex.: 40,00"}"></label>
+    <label class="field">Nota (opcional)<input name="nota" value="${esc(x.nota || "")}" placeholder="Ex.: ficar mais 2 h no turno"></label>
+    <span class="xs muted">Entra no vencimento ${S.cfg.heMesSeguinte === false ? "do próprio mês" : "do mês seguinte"} como trabalho suplementar.</span>`,
+  o => { const h = pnum(o.horas); if (!h) throw new Error("Indica as horas."); put("extras", {id:x.id, data:o.data, horas:h, valor:pnum(o.valor) || 0, nota:o.nota.trim()}); save(); render(); toast("Horas extra guardadas."); });
 }
 function dlgEvento(e = {}, k){
   openDlg("Novo compromisso", `<label class="field">O quê<input name="t" required value="${esc(e.t || "")}" placeholder="Ex.: Dentista"></label>
@@ -1764,10 +2236,12 @@ function dlgDay(k){
   openDlg(longDate(k), `<label class="field">Turno<select name="s">${opt([["auto", S.venc ? `Automático (Vencimentos: ${shiftLabel(shiftAuto(k))})` : "Sem alteração"],["M","Manhã · " + S.cfg.horas.M.join("–")],["T","Tarde · " + S.cfg.horas.T.join("–")],["N","Noite · " + S.cfg.horas.N.join("–")],["F","Férias"],["-","Folga"]], own ? own.s : "auto")}</select></label>
     ${isHoliday(k) ? '<span class="chip c-alta" style="align-self:flex-start">Feriado</span>' : ""}
     <div class="list">${evs.map(e => `<div class="item"><div class="grow"><div class="t">${esc(e.t)}</div><div class="s">${esc(e.hora || "sem hora")}</div></div></div>`).join("")}</div>
+    <div class="fields"><label class="field">Troca com (opcional)<input name="com" value="${esc((own && own.com) || "")}" placeholder="Nome do colega"></label><label class="field">Horas extra neste dia<input name="he" inputmode="decimal" placeholder="Ex.: 2"></label></div>
     <div class="fields"><label class="field">Novo compromisso<input name="t" placeholder="Ex.: Jantar com amigos"></label><label class="field">Hora<input type="time" name="hora"></label></div>
-    <span class="xs muted">Alterar o turno aqui só muda esta app. Para contar no vencimento, altera-o também na app Vencimentos.</span>`,
+    <span class="xs muted">As trocas e horas extra contam no vencimento previsto desta app. Para o recibo oficial, regista-as também na app Vencimentos.</span>`,
   o => {
-    if (o.s === "auto"){ if (own) remove("turnos", k); } else put("turnos", {id:k, s:o.s});
+    if (o.s === "auto"){ if (own) remove("turnos", k); } else put("turnos", {id:k, s:o.s, com:(o.com || "").trim()});
+    if (pnum(o.he) > 0) put("extras", {data:k, horas:pnum(o.he), valor:0, nota:""});
     if (o.t && o.t.trim()) put("eventos", {t:o.t.trim(), data:k, hora:o.hora, dur:60});
     save(); render();
   });
@@ -1887,7 +2361,8 @@ function applyItem(it, origem = "ia"){
   const t = today(); let r = null;
   switch (it.tipo){
     case "gasto": r = ["gastos", put("gastos", {data:it.data || t, valor:pnum(it.valor), desc:String(it.desc || "").trim(), cat:cats().includes(it.cat) ? it.cat : guessCat(it.desc), origem})]; break;
-    case "tarefa": r = ["tarefas", put("tarefas", {t:it.t || "Tarefa", data:it.data || "", hora:it.hora || "", prio:["alta","media","baixa"].includes(it.prio) ? it.prio : "media", tag:it.tag || "", feito:false, origem:"ia"})]; break;
+    case "tarefa": if (["diaria","semanal","mensal","anual"].includes(it.repete)){ const sr = criarSerie({t:it.t || "Tarefa", data:it.data || "", hora:it.hora || "", prio:["alta","media","baixa"].includes(it.prio) ? it.prio : "media", tag:it.tag || ""}, {freq:it.repete, dias:(it.dias || []).map(Number), dia:+it.dia || 0}); r = ["recorr", sr]; break; }
+      r = ["tarefas", put("tarefas", {t:it.t || "Tarefa", data:it.data || "", hora:it.hora || "", prio:["alta","media","baixa"].includes(it.prio) ? it.prio : "media", tag:it.tag || "", feito:false, origem:"ia"})]; break;
     case "evento": r = ["eventos", put("eventos", {t:it.t || "Compromisso", data:it.data || t, hora:it.hora || "", dur:pnum(it.dur) || 60})]; break;
     case "refeicao": { const h = it.hora || nowHM(); r = ["refeicoes", put("refeicoes", {data:it.data || UI.comDia || t, hora:h, tipo:REF_TIPOS.includes(it.tipo_ref) ? it.tipo_ref : guessRefTipo(h), desc:it.desc || "", kcal:pnum(it.kcal), p:pnum(it.p), h:pnum(it.h), g:pnum(it.g), origem:"ia"})]; break; }
     case "turno": if (it.data && ["M","T","N","F","-"].includes(it.s)) r = ["turnos", put("turnos", {id:it.data, s:it.s})]; break;
@@ -1903,6 +2378,18 @@ const A = {
   "del": el => { const c = el.dataset.col; remove(c, el.dataset.id); save(); render(); toast("Apagado."); },
   "tf": el => { UI.tarefasFiltro = el.dataset.v; render(); },
   "hdia": el => setDia(el.dataset.k),
+  "excel": () => exportarExcel(),
+  "resumo": el => dlgResumo(el.dataset.k),
+  "notif-on": () => ativarNotif(), "notif-off": () => desativarNotif(), "notif-test": () => testarNotif(),
+  "copia-fazer": async () => { try{ await api("/api/copias/fazer"); toast("Cópia guardada no servidor."); listarCopias(); }catch(e){ toast("Erro: " + (e.message || e)); } },
+  "copia-repor": el => openDlg("Repor esta cópia?", `<span class="small">A cópia de ${longDate(el.dataset.k)} volta a entrar: o que apagaste depois dessa data reaparece. O que criaste ou alteraste depois fica como está.</span>`, async () => {
+    try{ const j = await api("/api/copias/ler", {data:el.dataset.k}); reporCopia(j.v); save(); render(); toast("Cópia reposta."); }catch(e){ toast("Erro: " + (e.message || e)); }
+  }, "Repor"),
+  "add-serie": () => dlgTarefa({rep:"semanal", _soSerieNova:true}),
+  "edit-serie": el => { const r = byId("recorr", el.dataset.id); if (r) dlgTarefa({t:r.t, hora:r.hora, prio:r.prio, tag:r.tag, data:r.desde, serie:r.id, _soSerie:true}); },
+  "parar-serie": el => { const r = byId("recorr", el.dataset.id); openDlg("Deixar de repetir?", `<span class="small">«${esc(r ? r.t : "")}» deixa de se repetir. As vezes já concluídas ficam no histórico.</span>`, () => { pararSerie(el.dataset.id); save(); render(); toast("Deixou de se repetir."); }, "Deixar de repetir"); },
+  "add-troca": () => dlgTroca(), "del-troca": el => { remove("turnos", el.dataset.k); save(); render(); toast("Troca desfeita: volta o turno da app Vencimentos."); },
+  "add-extra": () => dlgExtra(), "edit-extra": el => dlgExtra(byId("extras", el.dataset.id)),
   "hsem": el => setDia(addDays(diaSel(), +el.dataset.v)),
   "ver-tarefas-dia": el => { UI.tarefasFiltro = "dia"; UI.dia = el.dataset.k; location.hash = "#tarefas"; },
   "add-evento-dia": el => dlgEvento({}, el.dataset.k),
@@ -2019,6 +2506,11 @@ document.addEventListener("change", e => {
     save();
     if (ok[i] && !(s.ok || {})[i]){ const box = el.closest(".ex"); if (box){ box.classList.add("ex-ok"); const cb = box.querySelector('[data-c="exok"]'); if (cb) cb.checked = true; } }
   }
+  else if (c === "rep-sel"){ const f = el.form || el.closest("form"); if (f){ f.querySelector(".rep-w").hidden = el.value !== "semanal"; f.querySelector(".rep-m").hidden = el.value !== "mensal"; } }
+  else if (c === "aviso"){ setCfg({avisos:Object.assign(avisos(), {[el.dataset.k]:Math.max(0, Math.round(pnum(el.value)))})}); save(); render(); }
+  else if (c === "aviso-bool"){ setCfg({avisos:Object.assign(avisos(), {[el.dataset.k]:el.checked})}); save(); }
+  else if (c === "aviso-hora"){ if (el.value){ setCfg({avisos:Object.assign(avisos(), {resumoHora:el.value})}); save(); } }
+  else if (c === "cfg-num"){ setCfg({[el.dataset.k]:pnum(el.value)}); save(); render(); }
   else if (c === "hdia-pick"){ if (el.value) setDia(el.value); }
   else if (c === "treino-sel"){ UI.treinoSel[t] = el.value; render(); }
   else if (c === "ex-sel"){ UI.exSel = el.value; render(); }
@@ -2033,7 +2525,8 @@ document.addEventListener("submit", e => {
   const f = e.target; if (f.dataset.form !== "quick-task") return;
   e.preventDefault();
   const q = f.q.value.trim(); if (!q) return;
-  const p = parseQuick(q); if (!p.t) return;
+  const pr = parseRep(q), p = parseQuick(pr.txt); if (!p.t) return;
+  if (pr.rep){ const s = criarSerie(p, pr.rep); save(); render(); toast(`«${p.t}» vai repetir ${repTexto(s)}.`); setTimeout(() => { const i = $("#qt"); if (i) i.focus(); }, 0); return; }
   if (!p.data && f.dataset.dia) p.data = f.dataset.dia;
   put("tarefas", Object.assign(p, {feito:false})); save(); render();
   setTimeout(() => { const i = $("#qt"); if (i) i.focus(); }, 0);
@@ -2062,13 +2555,18 @@ window.addEventListener("drop", e => {
 /* ---------- arranque ---------- */
 function boot(){
   let ch = readVencLocal();
+  ch = migrarRep() || ch;
+  ch = ensureRecorr() || ch;
   ch = applyFixos() || ch;
   ch = applyPoupAuto() || ch;
   if (ch) save();
   render();
-  window.addEventListener("hashchange", () => { render(); window.scrollTo(0, 0); });
+  copiaLocal();
+  if (/\?resumo/.test(location.hash)) setTimeout(() => { dlgResumo(); try{ history.replaceState(null, "", "#hoje"); }catch(e){} }, 400);
+  window.addEventListener("hashchange", () => { if (/\?resumo/.test(location.hash)){ dlgResumo(); try{ history.replaceState(null, "", "#hoje"); }catch(e){} } render(); window.scrollTo(0, 0); });
+  if ("serviceWorker" in navigator) navigator.serviceWorker.addEventListener("message", e => { if (e.data && e.data.abrir){ location.hash = e.data.abrir; } });
   matchMedia("(prefers-color-scheme: dark)").addEventListener("change", applyTheme);
-  document.addEventListener("visibilitychange", () => { if (document.visibilityState === "visible"){ if (readVencLocal() | applyFixos() | applyPoupAuto()) save(); syncNow(); softRender(); } });
+  document.addEventListener("visibilitychange", () => { if (document.visibilityState === "visible"){ if (readVencLocal() | ensureRecorr() | applyFixos() | applyPoupAuto()) save(); syncNow(); softRender(); } });
   setInterval(() => { if (document.visibilityState === "visible") syncNow(); }, 20000);
   setInterval(() => { if (document.visibilityState === "visible" && route() === "hoje") softRender(); }, 60000);
   syncNow();
@@ -2615,7 +3113,7 @@ function payment(y,m){
   return {cur,prv,p,fixo,ferA,ferB,extra,trA,trB,hPagas,not,outrosAb,subs,bruto,ss,base,he,I,acerto,irsTotal,outros,vFer,vHn,manual,
           reducao: reducaoDoMes(y,m), irsYear:I.year, irsTab:I.tabela, irsPct: P_manualPct(mm, I), irsPctAuto:I.autoPct, desc, liquido, alim};
 }
-return {payment, monthData};
+return {payment, monthData, valorHora:() => valorHora(fixoTotal())};
 }
 
 </script>
