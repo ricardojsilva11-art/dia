@@ -338,6 +338,7 @@ pre{white-space:pre-wrap; overflow-wrap:anywhere; background:var(--soft); paddin
 /* ============================================================
    dia. — núcleo: dados, datas, sincronização, horário
    ============================================================ */
+const APP_VERSION = "1.5 · 29/10/2026";
 const KEY = "dia-app-v1";
 const VENC_KEY = "vencimento-app-v1";
 const COLS = ["tarefas","eventos","gastos","fixos","refeicoes","agua","treinos","sessoes","inbox","turnos","saude"];
@@ -1270,6 +1271,7 @@ function vDef(){
     <section class="card">
       <h2>Cópia de segurança</h2>
       <span class="small muted">Guarda tudo num ficheiro ou repõe a partir de um ficheiro.</span>
+      <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center"><span class="small">Versão da app: <b>${APP_VERSION}</b></span><button class="btn sm ghost" type="button" data-a="atualizar">Procurar atualização</button></div>
       <div style="display:flex;gap:8px;flex-wrap:wrap"><button class="btn sm" type="button" data-a="export">Exportar cópia</button><button class="btn sm ghost" type="button" data-a="import">Importar cópia</button><button class="btn sm danger" type="button" data-a="wipe">Apagar dados deste aparelho</button></div>
     </section>
   </div>`;
@@ -1479,7 +1481,18 @@ const A = {
     openDlg("Gerar um código novo?", '<span class="small">Os outros aparelhos deixam de sincronizar até usarem o código novo. Se só queres ligar outro aparelho, copia o código atual para lá.</span>', go, "Gerar código novo");
   },
   "sync-now": () => syncNow(true),
-  "venc-import": () => pickFile(".json,application/json", async f => { try{ importVenc(JSON.parse(await f.text())); save(); render(); toast("Horário da app Vencimentos importado."); }catch(e){ toast(e.message); } }),
+  "atualizar": async () => {
+    toast("A procurar a versão mais recente…");
+    try{ const r = navigator.serviceWorker && await navigator.serviceWorker.getRegistration(); if (r) await r.update(); }catch(e){}
+    try{ const ks = await caches.keys(); await Promise.all(ks.map(k => caches.delete(k))); }catch(e){}
+    setTimeout(() => location.reload(), 600);
+  },
+  "venc-import": () => openDlg("Ligar a app Vencimentos", `<span class="small muted">Na app Vencimentos abre <b>Definições › Cópia de segurança</b> e carrega em <b>Copiar cópia de segurança</b>. Depois cola aqui (Ctrl+V, ou toque longo › Colar no iPhone).</span>
+      <label class="field">Cópia de segurança da app Vencimentos<textarea name="txt" rows="6" placeholder='{"v":4,"cfg":{…},"dias":{…}}' style="font-family:ui-monospace,monospace;font-size:12px"></textarea></label>
+      <button class="linkbtn" type="button" data-a="venc-file" style="align-self:flex-start">Ou escolher o ficheiro .json guardado</button>`,
+    o => { let obj; try{ obj = JSON.parse(String(o.txt || "").trim()); }catch(e){ throw new Error("Este texto não é uma cópia de segurança válida. Copia-a outra vez na app Vencimentos."); }
+      importVenc(obj); save(); render(); toast("Horário da app Vencimentos ligado."); }, "Ligar horário"),
+  "venc-file": () => { $("#dlg").close("cancel"); pickFile(".json,application/json", async f => { try{ importVenc(JSON.parse(await f.text())); save(); render(); toast("Horário da app Vencimentos ligado."); }catch(e){ toast(e.message || "Ficheiro inválido."); } }); },
   "venc-off": () => { S.venc = null; save(); render(); },
   "export": () => {
     const blob = new Blob([JSON.stringify(payload(), null, 1)], {type:"application/json"});
