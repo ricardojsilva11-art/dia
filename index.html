@@ -399,7 +399,7 @@ pre{white-space:pre-wrap; overflow-wrap:anywhere; background:var(--soft); paddin
 /* ============================================================
    dia. — núcleo: dados, datas, sincronização, horário
    ============================================================ */
-const APP_VERSION = "2.7 · 29/10/2026";
+const APP_VERSION = "2.8 · 29/10/2026";
 const KEY = "dia-app-v1";
 const VENC_KEY = "vencimento-app-v1";
 const COLS = ["tarefas","eventos","gastos","fixos","refeicoes","agua","treinos","sessoes","inbox","turnos","saude","poupObj","poupMov","poupAuto"];
@@ -1282,7 +1282,7 @@ function vTreino(){
     const sess = live("sessoes").filter(ss => ss.treinoId === evo.id && (evo.ex || []).some((e, i) => pesos(ss, i))).sort((a, b) => a.data.localeCompare(b.data)).slice(-6);
     const maxDe = (ss, i) => { const p = pesos(ss, i); return p ? Math.max(...p.filter(v => v != null && v !== "").map(Number)) : null; };
     const volume = ss => (evo.ex || []).reduce((tot, e, i) => { const p = pesos(ss, i); if (!p) return tot; return tot + p.reduce((a, v, j) => a + (pnum(v) * (p.length === 1 ? reps[i].reduce((x, y) => x + y, 0) : (reps[i][j] || reps[i][reps[i].length - 1] || 0))), 0); }, 0);
-    if (!sess.length) prog = '<div class="empty">Ainda não há cargas registadas neste treino.</div>';
+    if (!sess.length) prog = `<div class="empty">Ainda não registaste pesos no ${esc(evo.nome)}. No dia deste treino, escreve os kg de cada série em cima e o gráfico aparece aqui.</div>`;
     else {
       const rows = (evo.ex || []).map((e, i) => {
         const cells = sess.map(ss => { const p = pesos(ss, i); return `<td class="evo-c">${p ? esc(p.map(v => v == null || v === "" ? "—" : num(v)).join(" · ")) : '<span class="muted">—</span>'}</td>`; }).join("");
@@ -1307,13 +1307,13 @@ function vTreino(){
   <div class="row">
     <div class="main-col">
       <section class="card">
-        <div class="card-head"><h2>${isT ? "Hoje" : relDate(d0)}${sel ? " · " + esc(sel.nome) : ""}</h2>
+        <div class="card-head"><h2>${isT ? "Hoje" : relDate(d0)}${sel ? " · " + esc(sel.nome) : ""}</h2>${sel ? `<a class="linkbtn" href="#treino" data-a="ver-evo" data-tid="${sel.id}">Ver evolução ↓</a>` : ""}
           ${plano.length > 1 ? `<label class="small muted" style="display:flex;gap:8px;align-items:center">Treino <select class="input" style="width:auto;height:38px" data-c="treino-sel">${plano.map(p => `<option value="${p.id}" ${p.id === selId ? "selected" : ""}>${esc(p.nome)}</option>`).join("")}</select></label>` : ""}</div>
         ${shiftOf(d0) === "N" ? `<span class="chip c-N" style="align-self:flex-start">${isT ? "Hoje é" : "Dia de"} noite: treino leve ou descanso</span>` : ""}
         ${sel && !hojeTr.length ? `<span class="small muted">${isT ? "Hoje não tens" : "Neste dia não tens"} treino planeado. Se treinares, escolhe o treino e regista as cargas.</span>` : ""}
         ${sessHtml}
       </section>
-      <section class="card">
+      <section class="card" id="evolucao">
         <div class="card-head"><h2>Evolução por treino</h2>${plano.length ? `<select class="input" style="width:auto;max-width:100%;height:38px" aria-label="Treino" data-c="evo-sel">${plano.map(p => `<option value="${p.id}" ${evo && p.id === evo.id ? "selected" : ""}>${esc(p.nome)}</option>`).join("")}</select>` : ""}</div>
         ${prog || '<div class="empty">Cria um treino para veres a evolução.</div>'}
       </section>
@@ -1634,7 +1634,7 @@ function sugestoesHtml(){
 function evoChart(evo, maxDe){
   const pesosOk = (ss, i) => maxDe(ss, i) != null && isFinite(maxDe(ss, i));
   const sess = live("sessoes").filter(ss => ss.treinoId === evo.id && (evo.ex || []).some((e, i) => pesosOk(ss, i))).sort((a, b) => a.data.localeCompare(b.data)).slice(-12);
-  if (sess.length < 2) return '<div class="xs muted">O gráfico aparece a partir do segundo treino registado.</div>';
+  if (!sess.length) return "";
   const modo = UI.evoModo === "pct" ? "pct" : "kg";
   const exs = (evo.ex || []).slice(0, 8);
   const series = exs.map((e, i) => {
@@ -1670,6 +1670,7 @@ function evoChart(evo, maxDe){
       <div class="seg" role="group" aria-label="Escala"><button type="button" data-a="evo-modo" data-v="kg" aria-pressed="${modo === "kg"}">kg</button><button type="button" data-a="evo-modo" data-v="pct" aria-pressed="${modo === "pct"}">% de subida</button></div>
     </div>
     <div style="overflow-x:auto">${svg}</div>
+    ${sess.length === 1 ? `<div class="small" style="font-weight:600">Só tens um treino registado (${shortDate(sess[0].data)}). No próximo ${esc(evo.nome)} escreve os kg e aparece a linha da evolução.</div>` : ""}
     <div class="xs muted">Peso máximo de cada exercício em cada treino. ${modo === "pct" ? "Em % compara a subida de todos os exercícios a partir do primeiro treino." : "Passa o rato (ou toca) num ponto para ver o valor."}${(evo.ex || []).length > 8 ? " Mostra os primeiros 8 exercícios." : ""}</div>`;
 }
 
@@ -1926,6 +1927,7 @@ const A = {
   "gm": el => { const d = pdk(UI.gasMes + "-01"); d.setMonth(d.getMonth() + (+el.dataset.v)); UI.gasMes = ym(dk(d)); render(); },
   "cd": el => { const n = addDays(UI.comDia, +el.dataset.v); if (n <= today()){ UI.comDia = n; render(); } },
   "agua": el => { const k = el.dataset.k, o = byId("agua", k); const l = Math.max(0, r2((o && !o.del ? +o.l || 0 : 0) + (+el.dataset.v))); put("agua", {id:k, l, del:false}); save(); render(); },
+  "ver-evo": el => { UI.evoTreino = el.dataset.tid; render(); setTimeout(() => { const x = document.getElementById("evolucao"); if (x) x.scrollIntoView({behavior:"smooth", block:"start"}); }, 30); },
   "evo-modo": el => { UI.evoModo = el.dataset.v; render(); },
   "sets-copy": el => {
     const t = diaSel(), tid = el.dataset.tid, i = el.dataset.i, box = el.closest(".ex"), ins = box ? [...box.querySelectorAll('[data-c="setkg"]')] : [];
