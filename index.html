@@ -253,6 +253,16 @@ td input.input{height:38px; width:84px}
 .dropall.show{display:flex}
 .dropall div{background:var(--accent); color:var(--on-accent); padding:22px 28px; border-radius:24px; font-size:20px; font-weight:800}
 
+/* voz */
+.voz{display:flex; flex-direction:column; align-items:center; gap:12px; text-align:center}
+.mic{width:92px; height:92px; border-radius:46px; border:0; background:var(--accent); color:var(--on-accent); display:flex; align-items:center; justify-content:center; box-shadow:var(--shadow)}
+.mic.on{background:var(--red); color:#fff; animation:pulse 1.2s infinite}
+.voz-txt{font-size:20px; font-weight:800; letter-spacing:-.02em; overflow-wrap:anywhere}
+.voz-res{background:var(--soft); border-radius:16px; padding:12px 14px; font-size:15px; font-weight:600; width:100%; text-align:left}
+.voz .list{text-align:left}
+.voz-in{display:flex; gap:8px; width:100%}
+.voz-in .input{flex:1}
+
 /* gráfico */
 .chart{display:flex; align-items:flex-end; gap:10px; height:120px}
 .chart .col{flex:1; display:flex; flex-direction:column; align-items:center; justify-content:flex-end; gap:4px; height:100%; min-width:0}
@@ -310,6 +320,7 @@ pre{white-space:pre-wrap; overflow-wrap:anywhere; background:var(--soft); paddin
     <nav class="pills" aria-label="Secções" id="pills"></nav>
     <div class="tools">
       <button class="sync" id="syncBtn" type="button" title="Sincronização"><span class="dot" id="syncDot"></span><span class="lbl" id="syncLbl">Só neste aparelho</span></button>
+      <button class="iconbtn" id="micBtn" type="button" aria-label="Comando de voz" title="Comando de voz"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5 11a7 7 0 0 0 14 0M12 18v3"/></svg></button>
       <button class="iconbtn" id="themeBtn" type="button" aria-label="Tema"></button>
       <a class="avatar" href="#definicoes" id="avatar" aria-label="Definições">?</a>
     </div>
@@ -376,7 +387,7 @@ function defaultState(){
           horas:{M:["07:00","15:00"], T:["15:00","23:00"], N:["23:00","07:00"]},
           metas:{kcal:2200, p:140, h:250, g:73, agua:2.5},
           orc:Object.assign({}, DEFAULT_ORC) },
-    venc:null,
+    venc:null, agendaOut:null, gstatus:null,
     local:{ sync:{url:"", code:"", last:0, err:""} } };
   COLS.forEach(c => s[c] = []);
   return s;
@@ -419,7 +430,7 @@ function mergeState(a, b){
   if (!b) return a;
   const out = Object.assign({}, a);
   out.cfg = (b.cfg && (b.cfg.upd || 0) > (a.cfg.upd || 0)) ? Object.assign({}, a.cfg, b.cfg) : a.cfg;
-  out.venc = (b.venc && (!a.venc || (b.venc.upd || 0) > (a.venc.upd || 0))) ? b.venc : a.venc;
+  ["venc","agendaOut","gstatus"].forEach(k => { out[k] = (b[k] && (!a[k] || (b[k].upd || 0) > (a[k].upd || 0))) ? b[k] : (a[k] || null); });
   COLS.forEach(c => {
     const map = new Map();
     (a[c] || []).forEach(x => map.set(x.id, x));
@@ -459,6 +470,7 @@ async function syncNow(manual){
   if (!syncOn() || syncBusy) return;
   syncBusy = true; setSyncUI("busy", "A sincronizar…");
   try{
+    computeAgendaOut();
     const before = JSON.stringify(payload());
     const j = await api("/api/sync", {data:payload()});
     S = mergeState(S, j.data);
@@ -555,6 +567,17 @@ function shiftRange(s){ const h = S.cfg.horas[s]; if (!h) return null; let a = h
 const shiftLabel = s => s ? (isWork(s) ? `Turno da ${SHIFT_NAME[s]}` : s === "F" ? "Férias" : "Folga") : "Sem horário";
 const chipCls = s => s && "MTNF".includes(s) ? "c-" + s : "c-x";
 const chipTxt = s => s ? (s === "-" ? "—" : s) : "?";
+
+/* turnos e treinos dos próximos 35 dias, para o calendário Google */
+function computeAgendaOut(){
+  const t = today(), itens = [];
+  for (let i = 0; i < 35; i++){
+    const k = addDays(t, i), s = shiftOf(k);
+    if (isWork(s)){ const r = shiftRange(s); if (r) itens.push({id:`t-${k}`, t:`Turno ${s} · ${SHIFT_NAME[s]}`, ini:`${k}T${m2hm(r[0])}`, fim:`${r[1] >= 1440 ? addDays(k, 1) : k}T${m2hm(r[1])}`}); }
+    treinosDoDia(k).forEach(tr => { const a = hm2m(tr.hora || S.cfg.treinoHora) ?? 1050; itens.push({id:`tr-${k}-${tr.id}`, t:`Treino · ${tr.nome}`, ini:`${k}T${m2hm(a)}`, fim:`${k}T${m2hm(Math.min(a + 60, 1439))}`}); });
+  }
+  if (!S.agendaOut || JSON.stringify(S.agendaOut.itens) !== JSON.stringify(itens)) S.agendaOut = {upd:Date.now(), itens};
+}
 
 /* ---------- tarefas ---------- */
 function nextDate(k, rep){
@@ -664,6 +687,8 @@ const IC = {
   cam:'<path d="M4 8h3l2-3h6l2 3h3v11H4z"/><circle cx="12" cy="13" r="3.5"/>',
   file:'<path d="M14 3H6a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9z"/><path d="M14 3v6h6"/>',
   plus:'<path d="M12 5v14M5 12h14"/>', drop:'<path d="M12 3s6 6.5 6 11a6 6 0 0 1-12 0c0-4.5 6-11 6-11z"/>',
+  mic:'<rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5 11a7 7 0 0 0 14 0M12 18v3"/>',
+  google:'<path d="M21 12.2c0-.7-.1-1.3-.2-1.9H12v3.6h5.1a4.4 4.4 0 0 1-1.9 2.9v2.4h3.1c1.8-1.7 2.7-4.1 2.7-7z"/><path d="M12 21.5c2.6 0 4.7-.9 6.3-2.3l-3.1-2.4c-.9.6-2 .9-3.2.9-2.5 0-4.6-1.7-5.3-3.9H3.5v2.5A9.5 9.5 0 0 0 12 21.5z"/>',
   cal:'<rect x="3" y="4" width="18" height="17" rx="2"/><path d="M3 9h18M8 2v4M16 2v4M8 14h3"/>'
 };
 const ic = (n, s = 20, sw = 2) => `<svg width="${s}" height="${s}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="${sw}" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${IC[n]}</svg>`;
@@ -1001,7 +1026,7 @@ function vHorario(){
     <div class="side-col">
       <section class="card">
         <div class="card-head"><h2>Compromissos do mês</h2><button class="btn sm" type="button" data-a="add-evento">+ Novo</button></div>
-        <div class="list">${monthEvs.map(e => `<div class="item"><div class="grow"><div class="t">${esc(e.t)}</div><div class="s">${shortDate(e.data)}${e.hora ? " · " + e.hora : ""}</div></div><button class="x" type="button" data-a="del" data-col="eventos" data-id="${e.id}" aria-label="Apagar compromisso">${ic("x", 16)}</button></div>`).join("") || '<div class="empty">Sem compromissos este mês.</div>'}</div>
+        <div class="list">${monthEvs.map(e => `<div class="item"><div class="grow"><div class="t">${esc(e.t)}${e.origem === "google" ? ' <span class="chip c-x">Google</span>' : ""}</div><div class="s">${shortDate(e.data)}${e.hora ? " · " + e.hora : ""}${e.local ? " · " + esc(e.local) : ""}</div></div><button class="x" type="button" data-a="del" data-col="eventos" data-id="${e.id}" aria-label="Apagar compromisso">${ic("x", 16)}</button></div>`).join("") || '<div class="empty">Sem compromissos este mês.</div>'}</div>
       </section>
       ${aiCard("horario", "Lê a escala e mostra o que muda face ao teu horário", "Escala em PDF, Excel, foto do quadro")}
     </div>
@@ -1165,7 +1190,14 @@ function vGastos(){
 }
 
 /* ---------- DEFINIÇÕES ---------- */
+async function pingServer(){
+  UI.pingBusy = true;
+  try{ const r = await fetch(apiBase() + "/"); UI.ping = await r.json(); }catch(e){ UI.ping = {ia:false, voz:false, erro:true}; }
+  UI.pingT = Date.now(); UI.pingBusy = false;
+  if (route() === "definicoes") softRender();
+}
 function vDef(){
+  if (syncOn() && !UI.pingBusy && (!UI.ping || Date.now() - UI.pingT > 60000)) pingServer();
   const c = S.cfg, sy = S.local.sync, base = apiBase(), v = S.venc;
   const tema = c.tema || "auto";
   return `
@@ -1209,10 +1241,30 @@ function vDef(){
       <h2>Entrada automática (Atalhos do iPhone)</h2>
       ${syncOn() ? `<span class="small muted">Na app Atalhos cria uma automação «Transação» (Apple Pay) com a ação «Obter conteúdo do URL»: método POST, corpo JSON, para este endereço:</span>
         <code>${esc(base)}/api/in</code>
-        <pre>{"code":"${esc(sy.code)}","tipo":"gasto","valor":<Montante>,"desc":"<Comerciante>","origem":"applepay"}</pre>
+        <pre>{"code":"${esc(sy.code)}","tipo":"gasto","valor":&lt;Montante&gt;,"desc":"&lt;Comerciante&gt;","origem":"applepay"}</pre>
         <span class="small muted">Para o Apple Saúde, uma automação diária às 23:30 com:</span>
-        <pre>{"code":"${esc(sy.code)}","tipo":"saude","passos":<Passos>,"sono":<Horas de sono>,"peso":<Peso>}</pre>
+        <pre>{"code":"${esc(sy.code)}","tipo":"saude","passos":&lt;Passos&gt;,"sono":&lt;Horas de sono&gt;,"peso":&lt;Peso&gt;}</pre>
         <span class="xs muted">O que entra assim aparece em «Entrou sozinho» no ecrã Hoje para confirmares.</span>` : `<span class="small muted">Liga primeiro a sincronização. Depois aparece aqui o endereço para os Atalhos do iPhone enviarem pagamentos Apple Pay e dados do Apple Saúde.</span>`}
+    </section>
+
+    <section class="card">
+      <div class="card-head"><h2>Voz</h2><span class="chip ${UI.ping && UI.ping.ia ? "c-ok" : "c-x"}">${UI.ping ? (UI.ping.ia ? "IA ligada" : "IA desligada") : "—"}</span></div>
+      <span class="small muted">Toca no microfone (em cima, ou no «+» do iPhone) e fala: «gastei 12 euros no almoço», «lembra-me de pagar a luz amanhã às 10», «bebi um copo de água», «que turno tenho amanhã?».</span>
+      <label class="item" style="border:0;min-height:44px"><input class="check" type="checkbox" data-c="cfg-bool" data-k="falar" ${c.falar !== false ? "checked" : ""}> <span class="small" style="font-weight:700">Ler as respostas em voz alta</span></label>
+      <span class="xs muted">${UI.ping ? `Servidor: IA ${UI.ping.ia ? "ligada (entende pedidos livres)" : "desligada (só comandos simples)"} · gravação de voz ${UI.ping.voz ? "ligada" : "desligada (liga «Workers AI» no servidor se o reconhecimento do navegador não funcionar)"}.` : (syncOn() ? "A verificar o servidor…" : "Sem servidor: só comandos simples, com o reconhecimento de voz do navegador.")}</span>
+    </section>
+
+    <section class="card">
+      <div class="card-head"><h2>Gmail e Google Calendário</h2><span class="chip ${S.gstatus && S.gstatus.cal ? "c-ok" : "c-x"}">${S.gstatus && S.gstatus.cal ? "Ligado" : "Por ligar"}</span></div>
+      ${S.gstatus && (S.gstatus.cal || S.gstatus.gmail) ? `<span class="small muted">Calendário lido ${S.gstatus.cal ? new Date(S.gstatus.cal).toLocaleString("pt-PT") : "—"} (${S.gstatus.calN || 0} compromissos) · turnos escritos ${S.gstatus.calW ? new Date(S.gstatus.calW).toLocaleString("pt-PT") : "—"} · Gmail: ${S.gstatus.gmailN || 0} emails lidos${S.gstatus.gmail ? ", o último " + new Date(S.gstatus.gmail).toLocaleString("pt-PT") : ""}.</span>` : ""}
+      <span class="small muted">Um pequeno script na tua conta Google faz a ligação de 15 em 15 minutos: traz os compromissos do teu calendário, põe os turnos e treinos num calendário «dia.» e envia para a IA os emails com faturas, avisos ou escalas (ou com a etiqueta «dia»).</span>
+      ${syncOn() ? `<ol class="small" style="margin:0;padding-left:20px;display:flex;flex-direction:column;gap:4px">
+        <li>Carrega em <b>Copiar script</b> (já leva o teu endereço e código).</li>
+        <li>Abre <b>script.google.com</b> › <b>Novo projeto</b>.</li>
+        <li>Apaga o que lá está, cola o script e carrega em <b>Guardar</b>.</li>
+        <li>Em cima escolhe a função <b>instalar</b> e carrega em <b>Executar</b>. Autoriza com a tua conta Google.</li>
+      </ol>
+      <div style="display:flex;gap:8px;flex-wrap:wrap"><button class="btn sm" type="button" data-a="gscript">${ic("google", 16)} Copiar script</button></div>` : `<span class="small" style="font-weight:700">Liga primeiro a sincronização acima.</span>`}
     </section>
 
     <section class="card">
@@ -1227,10 +1279,10 @@ function vDef(){
    dia. — ações, diálogos, IA e arranque
    ============================================================ */
 let dlgCb = null;
-function openDlg(title, inner, onOk, okLabel = "Guardar", extra = ""){
+function openDlg(title, inner, onOk, okLabel = "Guardar", extra = "", cancelLabel = "Cancelar"){
   const f = $("#dlgForm");
   delete f.dataset.tipoMan;
-  f.innerHTML = `<h2>${esc(title)}</h2>${inner}<div class="dlg-actions">${extra}<button class="btn ghost" value="cancel" formnovalidate>Cancelar</button>${onOk ? `<button class="btn" value="ok">${esc(okLabel)}</button>` : ""}</div>`;
+  f.innerHTML = `<h2>${esc(title)}</h2>${inner}<div class="dlg-actions">${extra}<button class="btn ghost" value="cancel" formnovalidate>${esc(cancelLabel)}</button>${onOk ? `<button class="btn" value="ok">${esc(okLabel)}</button>` : ""}</div>`;
   dlgCb = onOk;
   const d = $("#dlg"); d.returnValue = "cancel"; d.showModal();
   const first = f.querySelector("input:not([type=hidden]):not([type=checkbox]),select,textarea"); if (first) setTimeout(() => first.focus(), 30);
@@ -1323,6 +1375,7 @@ function dlgDay(k){
 }
 function dlgSheet(){
   openDlg("Registar", `<div class="sheet-opts">
+    <button type="button" data-a="sheet" data-v="voz" style="grid-column:1/-1;background:var(--accent);color:var(--on-accent)">${ic("mic", 22)}Falar</button>
     <button type="button" data-a="sheet" data-v="gasto">${ic("gastos", 22)}Gasto</button>
     <button type="button" data-a="sheet" data-v="tarefa">${ic("tarefas", 22)}Tarefa</button>
     <button type="button" data-a="sheet" data-v="refeicao">${ic("comida", 22)}Refeição</button>
@@ -1383,16 +1436,17 @@ async function aiFiles(files, sec){
   }
 }
 function applyItem(it, origem = "ia"){
-  const t = today();
+  const t = today(); let r = null;
   switch (it.tipo){
-    case "gasto": put("gastos", {data:it.data || t, valor:pnum(it.valor), desc:String(it.desc || "").trim(), cat:cats().includes(it.cat) ? it.cat : guessCat(it.desc), origem}); break;
-    case "tarefa": put("tarefas", {t:it.t || "Tarefa", data:it.data || "", hora:it.hora || "", prio:["alta","media","baixa"].includes(it.prio) ? it.prio : "media", tag:it.tag || "", feito:false, origem:"ia"}); break;
-    case "evento": put("eventos", {t:it.t || "Compromisso", data:it.data || t, hora:it.hora || "", dur:pnum(it.dur) || 60}); break;
-    case "refeicao": { const h = it.hora || nowHM(); put("refeicoes", {data:it.data || UI.comDia || t, hora:h, tipo:REF_TIPOS.includes(it.tipo_ref) ? it.tipo_ref : guessRefTipo(h), desc:it.desc || "", kcal:pnum(it.kcal), p:pnum(it.p), h:pnum(it.h), g:pnum(it.g), origem:"ia"}); break; }
-    case "turno": if (it.data && ["M","T","N","F","-"].includes(it.s)) put("turnos", {id:it.data, s:it.s}); break;
-    case "treino": put("treinos", {nome:it.nome || "Treino", hora:it.hora || S.cfg.treinoHora, dias:(it.dias || []).map(Number).filter(d => d >= 0 && d <= 6), ex:(it.ex || []).map(e => ({n:e.n || e.nome, s:pnum(e.s) || 3, r:String(e.r || "10")}))}); break;
-    case "saude": { const id = it.data || addDays(t, -1); const o = byId("saude", id) || {}; put("saude", {id, passos:pnum(it.passos) || o.passos, sono:pnum(it.sono) || o.sono, peso:pnum(it.peso) || o.peso}); break; }
+    case "gasto": r = ["gastos", put("gastos", {data:it.data || t, valor:pnum(it.valor), desc:String(it.desc || "").trim(), cat:cats().includes(it.cat) ? it.cat : guessCat(it.desc), origem})]; break;
+    case "tarefa": r = ["tarefas", put("tarefas", {t:it.t || "Tarefa", data:it.data || "", hora:it.hora || "", prio:["alta","media","baixa"].includes(it.prio) ? it.prio : "media", tag:it.tag || "", feito:false, origem:"ia"})]; break;
+    case "evento": r = ["eventos", put("eventos", {t:it.t || "Compromisso", data:it.data || t, hora:it.hora || "", dur:pnum(it.dur) || 60})]; break;
+    case "refeicao": { const h = it.hora || nowHM(); r = ["refeicoes", put("refeicoes", {data:it.data || UI.comDia || t, hora:h, tipo:REF_TIPOS.includes(it.tipo_ref) ? it.tipo_ref : guessRefTipo(h), desc:it.desc || "", kcal:pnum(it.kcal), p:pnum(it.p), h:pnum(it.h), g:pnum(it.g), origem:"ia"})]; break; }
+    case "turno": if (it.data && ["M","T","N","F","-"].includes(it.s)) r = ["turnos", put("turnos", {id:it.data, s:it.s})]; break;
+    case "treino": r = ["treinos", put("treinos", {nome:it.nome || "Treino", hora:it.hora || S.cfg.treinoHora, dias:(it.dias || []).map(Number).filter(d => d >= 0 && d <= 6), ex:(it.ex || []).map(e => ({n:e.n || e.nome, s:pnum(e.s) || 3, r:String(e.r || "10")}))})]; break;
+    case "saude": { const id = it.data || addDays(t, -1); const o = byId("saude", id) || {}; r = ["saude", put("saude", {id, passos:pnum(it.passos) || o.passos, sono:pnum(it.sono) || o.sono, peso:pnum(it.peso) || o.peso})]; break; }
   }
+  return r ? [r[0], r[1].id] : null;
 }
 
 /* ---------- cliques ---------- */
@@ -1439,7 +1493,7 @@ const A = {
     }catch(e){ toast(e.message || "Ficheiro inválido."); } }),
   "wipe": () => openDlg("Apagar dados deste aparelho?", '<span class="small">Apaga tudo o que está guardado neste aparelho. Se tiveres sincronização, os dados continuam no servidor e voltam quando ligares de novo o código.</span>', () => { try{ localStorage.removeItem(KEY); }catch(e){} S = defaultState(); render(); toast("Dados apagados."); }, "Apagar"),
   "sheet": el => { $("#dlg").close("cancel"); const v = el.dataset.v; setTimeout(() => {
-    if (v === "gasto") dlgGasto(); else if (v === "tarefa") dlgTarefa(); else if (v === "refeicao") dlgRefeicao(); else if (v === "evento") dlgEvento();
+    if (v === "voz") abrirVoz(); else if (v === "gasto") dlgGasto(); else if (v === "tarefa") dlgTarefa(); else if (v === "refeicao") dlgRefeicao(); else if (v === "evento") dlgEvento();
     else pickFile("image/*,application/pdf,.pdf,.csv,.xlsx,.xls", f => aiFiles([f], secOf(route())), v === "foto"); }, 50); }
 };
 function pickFile(accept, cb, camera){
@@ -1453,6 +1507,7 @@ document.addEventListener("click", e => {
 $("#themeBtn").addEventListener("click", () => { const n = {auto:"light", light:"dark", dark:"auto"}[S.cfg.tema || "auto"]; setCfg({tema:n}); save(); render(); toast("Tema: " + ({auto:"automático (segue o sistema)", light:"claro", dark:"escuro"})[n]); });
 $("#syncBtn").addEventListener("click", () => syncOn() ? syncNow(true) : (location.hash = "#definicoes"));
 $("#fab").addEventListener("click", dlgSheet);
+$("#micBtn").addEventListener("click", abrirVoz);
 
 /* ---------- alterações em campos ---------- */
 document.addEventListener("change", e => {
@@ -1468,6 +1523,7 @@ document.addEventListener("change", e => {
   }
   else if (c === "treino-sel"){ UI.treinoSel[t] = el.value; render(); }
   else if (c === "ex-sel"){ UI.exSel = el.value; render(); }
+  else if (c === "cfg-bool"){ setCfg({[el.dataset.k]:el.checked}); save(); }
   else if (c === "cfg"){ setCfg({[el.dataset.k]:el.value.trim()}); save(); render(); }
   else if (c === "sync"){ S.local.sync[el.dataset.k] = el.value.trim(); S.local.sync.err = ""; persist(); render(); syncNow(true); }
   else if (c === "hora"){ const h = JSON.parse(JSON.stringify(S.cfg.horas)); h[el.dataset.s][+el.dataset.i] = el.value; setCfg({horas:h}); save(); render(); }
@@ -1517,6 +1573,183 @@ function boot(){
   if ("serviceWorker" in navigator && location.protocol === "https:" && !/claude|claudeusercontent/.test(location.hostname)) navigator.serviceWorker.register("sw.js").catch(() => {});
 }
 boot();
+
+/* ============================================================
+   dia. — comando por voz e ligação Google
+   ============================================================ */
+const GSCRIPT = "/* ============================================================\n   dia. \u2014 liga\u00e7\u00e3o ao Gmail e ao Google Calend\u00e1rio\n   Corre na tua conta Google (script.google.com). N\u00e3o precisa de\n   projeto na Google Cloud. De 15 em 15 minutos:\n   1. l\u00ea o teu calend\u00e1rio e envia os compromissos para a app;\n   2. escreve os teus turnos e treinos num calend\u00e1rio \u00abdia.\u00bb;\n   3. procura emails com faturas, avisos ou escalas e envia-os\n      para a IA da app (aparecem em \u00abEntrou sozinho\u00bb).\n   ============================================================ */\nconst CONFIG = {\n  URL: \"__URL__\",                 // endere\u00e7o do servidor (Cloudflare Worker)\n  CODIGO: \"__CODIGO__\",           // o teu c\u00f3digo pessoal da app\n  CALENDARIO_LER: \"principal\",    // \"principal\" ou o ID de outro calend\u00e1rio\n  CALENDARIO_TURNOS: \"dia. \u00b7 turnos e treinos\",\n  DIAS: 35,                       // quantos dias para a frente\n  LER_GMAIL: true,\n  GMAIL_PESQUISA: 'newer_than:3d -label:dia-lido (label:dia OR (has:attachment (fatura OR factura OR recibo OR escala OR \"aviso de pagamento\" OR \"nota de cobran\u00e7a\" OR \"documento de cobran\u00e7a\")))',\n  GMAIL_MAX: 8\n};\n\n/* Corre esta fun\u00e7\u00e3o UMA vez: pede autoriza\u00e7\u00e3o e liga a sincroniza\u00e7\u00e3o autom\u00e1tica. */\nfunction instalar(){\n  ScriptApp.getProjectTriggers().filter(t => t.getHandlerFunction() === \"sincronizar\").forEach(t => ScriptApp.deleteTrigger(t));\n  ScriptApp.newTrigger(\"sincronizar\").timeBased().everyMinutes(15).create();\n  sincronizar();\n  Logger.log(\"Feito. A liga\u00e7\u00e3o corre sozinha de 15 em 15 minutos.\");\n}\n\nfunction sincronizar(){\n  const erros = [];\n  try{ lerCalendario(); }catch(e){ erros.push(\"Calend\u00e1rio: \" + e.message); }\n  try{ escreverTurnos(); }catch(e){ erros.push(\"Turnos: \" + e.message); }\n  if (CONFIG.LER_GMAIL){ try{ lerGmail(); }catch(e){ erros.push(\"Gmail: \" + e.message); } }\n  if (erros.length) throw new Error(erros.join(\" | \"));\n}\n\n/* ---------- utilit\u00e1rios ---------- */\nfunction enviar(caminho, corpo){\n  corpo.code = CONFIG.CODIGO;\n  const r = UrlFetchApp.fetch(CONFIG.URL.replace(/\\/+$/, \"\") + caminho, {method:\"post\", contentType:\"application/json\", payload:JSON.stringify(corpo), muteHttpExceptions:true});\n  let j = {}; try{ j = JSON.parse(r.getContentText() || \"{}\"); }catch(e){}\n  if (r.getResponseCode() >= 300) throw new Error(j.error || (\"erro \" + r.getResponseCode()));\n  return j;\n}\nconst TZ = () => Session.getScriptTimeZone();\nconst dia = d => Utilities.formatDate(d, TZ(), \"yyyy-MM-dd\");\nconst hora = d => Utilities.formatDate(d, TZ(), \"HH:mm\");\nfunction paraData(s){ const m = /^(\\d{4})-(\\d{2})-(\\d{2})T(\\d{2}):(\\d{2})/.exec(s); return new Date(+m[1], +m[2] - 1, +m[3], +m[4], +m[5]); }\n\n/* ---------- 1. calend\u00e1rio \u2192 app ---------- */\nfunction lerCalendario(){\n  const cal = CONFIG.CALENDARIO_LER === \"principal\" ? CalendarApp.getDefaultCalendar() : CalendarApp.getCalendarById(CONFIG.CALENDARIO_LER);\n  if (!cal) throw new Error(\"calend\u00e1rio n\u00e3o encontrado\");\n  const ini = new Date(); ini.setHours(0, 0, 0, 0); ini.setDate(ini.getDate() - 1);\n  const fim = new Date(ini.getTime() + (CONFIG.DIAS + 1) * 86400000);\n  const eventos = cal.getEvents(ini, fim).map(e => {\n    const a = e.getStartTime(), b = e.getEndTime(), todoDia = e.isAllDayEvent();\n    return {gid:e.getId() + \"|\" + a.getTime(), t:e.getTitle(), data:dia(a), hora:todoDia ? \"\" : hora(a), dur:todoDia ? 60 : Math.round((b - a) / 60000), local:e.getLocation() || \"\"};\n  });\n  enviar(\"/api/google\", {tipo:\"agenda\", ini:dia(ini), fim:dia(fim), eventos});\n}\n\n/* ---------- 2. turnos e treinos da app \u2192 calend\u00e1rio \u00abdia.\u00bb ---------- */\nfunction escreverTurnos(){\n  const j = enviar(\"/api/google\", {tipo:\"turnos\"});\n  const itens = j.itens || [];\n  let cal = CalendarApp.getCalendarsByName(CONFIG.CALENDARIO_TURNOS)[0];\n  if (!cal) cal = CalendarApp.createCalendar(CONFIG.CALENDARIO_TURNOS, {color:CalendarApp.Color.YELLOW});\n  const ini = new Date(); ini.setHours(0, 0, 0, 0);\n  const fim = new Date(ini.getTime() + (CONFIG.DIAS + 2) * 86400000);\n  const existentes = {};\n  cal.getEvents(ini, fim).forEach(e => { const id = e.getTag(\"dia-id\"); if (id) existentes[id] = e; else e.deleteEvent(); });\n  const queremos = {};\n  itens.forEach(it => {\n    queremos[it.id] = true;\n    const a = paraData(it.ini), b = paraData(it.fim), e = existentes[it.id];\n    if (e && e.getTitle() === it.t && e.getStartTime().getTime() === a.getTime() && e.getEndTime().getTime() === b.getTime()) return;\n    if (e) e.deleteEvent();\n    const n = cal.createEvent(it.t, a, b);\n    n.setTag(\"dia-id\", it.id);\n  });\n  Object.keys(existentes).forEach(id => { if (!queremos[id]) existentes[id].deleteEvent(); });\n}\n\n/* ---------- 3. Gmail \u2192 IA da app ---------- */\nfunction lerGmail(){\n  const lido = GmailApp.getUserLabelByName(\"dia-lido\") || GmailApp.createLabel(\"dia-lido\");\n  GmailApp.search(CONFIG.GMAIL_PESQUISA, 0, CONFIG.GMAIL_MAX).forEach(th => {\n    const m = th.getMessages().pop(), assunto = m.getSubject(), de = m.getFrom();\n    const anexos = m.getAttachments({includeInlineImages:false}).filter(a => /pdf|image\\//.test(a.getContentType()) && a.getSize() < 8e6).slice(0, 2);\n    if (anexos.length){\n      anexos.forEach(a => enviar(\"/api/google\", {tipo:\"email\", assunto, de, ficheiro:{nome:a.getName(), mime:a.getContentType().indexOf(\"pdf\") >= 0 ? \"application/pdf\" : a.getContentType(), b64:Utilities.base64Encode(a.getBytes())}}));\n    } else {\n      enviar(\"/api/google\", {tipo:\"email\", assunto, de, ficheiro:{nome:assunto, mime:\"text/plain\", texto:\"De: \" + de + \"\\nAssunto: \" + assunto + \"\\nData: \" + m.getDate() + \"\\n\\n\" + m.getPlainBody().slice(0, 20000)}});\n    }\n    th.addLabel(lido);\n  });\n}\n";
+const V = {ouvindo:false, gravando:false, texto:"", estado:"", resposta:"", feitos:[], undo:[], erro:"", srFalhou:false, rec:null, mr:null, stream:null, timer:null};
+
+function abrirVoz(){
+  Object.assign(V, {texto:"", estado:"", resposta:"", feitos:[], undo:[], erro:""});
+  openDlg("Comando de voz", `<div id="vozBox" class="voz"></div>`, null, "", "", "Fechar");
+  vozUI();
+  setTimeout(vozMic, 150);
+}
+function vozUI(){
+  const box = document.getElementById("vozBox"); if (!box) return;
+  const on = V.ouvindo || V.gravando;
+  box.innerHTML = `
+    <button type="button" class="mic ${on ? "on" : ""}" data-a="voz-mic" aria-label="${on ? "Parar" : "Falar"}">${ic("mic", 34)}</button>
+    <div class="small muted" aria-live="polite">${esc(V.erro || V.estado || (on ? (V.gravando ? "A gravar… toca outra vez para terminar." : "A ouvir…") : "Toca no microfone e fala."))}</div>
+    ${V.texto ? `<div class="voz-txt">«${esc(V.texto)}»</div>` : ""}
+    ${V.resposta ? `<div class="voz-res">${esc(V.resposta)}</div>` : ""}
+    ${V.feitos.length ? `<div class="list" style="width:100%">${V.feitos.map(f => `<div class="item"><span class="chip c-ok">Feito</span><span class="grow small">${esc(f)}</span></div>`).join("")}</div>
+      <button class="btn sm ghost" type="button" data-a="voz-desfazer">Desfazer</button>` : ""}
+    <div class="voz-in"><label for="vozIn" class="sr">Escrever comando</label><input id="vozIn" class="input" placeholder="Ou escreve aqui o pedido…" autocomplete="off"><button class="btn sm" type="button" data-a="voz-enviar">Enviar</button></div>
+    <div class="xs muted">Exemplos: «gastei 12,50 no almoço» · «lembra-me de pagar o IUC sexta às 10h» · «bebi dois copos de água» · «almocei frango com arroz» · «que turno tenho amanhã?» · «quanto gastei este mês?»</div>`;
+}
+document.addEventListener("keydown", e => { if (e.target && e.target.id === "vozIn" && e.key === "Enter"){ e.preventDefault(); A["voz-enviar"](); } });
+
+async function vozMic(){
+  if (V.ouvindo){ try{ V.rec.stop(); }catch(e){} return; }
+  if (V.gravando) return pararGravacao();
+  V.erro = ""; V.texto = ""; V.resposta = ""; V.feitos = []; V.undo = [];
+  const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+  if (SR && !V.srFalhou){
+    try{
+      const r = new SR(); r.lang = "pt-PT"; r.interimResults = true; r.continuous = false; r.maxAlternatives = 1;
+      let falhou = false;
+      r.onresult = e => { V.texto = [...e.results].map(x => x[0].transcript).join(" ").trim(); vozUI(); };
+      r.onerror = e => {
+        falhou = true; V.ouvindo = false;
+        if (e.error === "not-allowed") V.erro = "O microfone está bloqueado. Autoriza o microfone para este site nas definições do navegador.";
+        else if (e.error === "no-speech") V.erro = "Não ouvi nada. Toca outra vez e fala.";
+        else { V.srFalhou = true; if (syncOn()) return gravar(); V.erro = "O reconhecimento de voz deste navegador não está disponível. Escreve o pedido em baixo."; }
+        vozUI();
+      };
+      r.onend = () => { V.ouvindo = false; vozUI(); if (!falhou && V.texto) executarComando(V.texto); };
+      V.rec = r; V.ouvindo = true; vozUI(); r.start(); return;
+    }catch(e){ V.srFalhou = true; }
+  }
+  if (syncOn()) return gravar();
+  V.erro = "Este navegador não tem reconhecimento de voz. Liga o servidor nas Definições para usar a gravação, ou escreve o pedido em baixo."; vozUI();
+}
+async function gravar(){
+  try{
+    V.stream = await navigator.mediaDevices.getUserMedia({audio:true});
+    const tipo = ["audio/webm;codecs=opus","audio/webm","audio/mp4","audio/aac"].find(t => window.MediaRecorder && MediaRecorder.isTypeSupported(t)) || "";
+    const mr = new MediaRecorder(V.stream, tipo ? {mimeType:tipo} : undefined), partes = [];
+    mr.ondataavailable = e => e.data.size && partes.push(e.data);
+    mr.onstop = async () => {
+      V.stream.getTracks().forEach(t => t.stop()); V.gravando = false; clearTimeout(V.timer);
+      V.estado = "A passar a voz para texto…"; vozUI();
+      try{
+        const blob = new Blob(partes, {type:mr.mimeType || tipo || "audio/webm"});
+        const j = await api("/api/voz", {audio:b64(await blob.arrayBuffer())});
+        V.texto = j.texto || ""; V.estado = "";
+        if (!V.texto){ V.erro = "Não percebi o que disseste. Tenta outra vez."; vozUI(); return; }
+        vozUI(); executarComando(V.texto);
+      }catch(e){ V.estado = ""; V.erro = e.message || String(e); vozUI(); }
+    };
+    V.mr = mr; mr.start(); V.gravando = true; vozUI();
+    V.timer = setTimeout(pararGravacao, 15000);
+  }catch(e){ V.gravando = false; V.erro = "Não consegui usar o microfone: autoriza-o nas definições do navegador."; vozUI(); }
+}
+function pararGravacao(){ try{ V.mr && V.mr.state !== "inactive" && V.mr.stop(); }catch(e){} }
+
+function ctxComando(){
+  const t = today(), g = gastosMes(ym(t)), porCat = {};
+  g.forEach(x => porCat[x.cat || "Outros"] = r2((porCat[x.cat || "Outros"] || 0) + (+x.valor || 0)));
+  return {
+    hoje:t, agora:m2hm(nowMin()), diaSemana:DOW[pdk(t).getDay()], nome:S.cfg.nome || "",
+    categorias:cats(), orcamentoMensal:S.cfg.orc,
+    gastos:{mes:r2(somaGastos(g)), hoje:r2(somaGastos(g.filter(x => x.data === t))), porCategoria:porCat, ultimos:g.sort((a, b) => b.data.localeCompare(a.data)).slice(0, 15).map(x => ({data:x.data, valor:x.valor, desc:x.desc, cat:x.cat}))},
+    horario:Array.from({length:14}, (_, i) => { const k = addDays(t, i), s = shiftOf(k); return {data:k, dia:DOW3[pdk(k).getDay()], turno:s ? shiftLabel(s) : "sem horário", horas:isWork(s) ? S.cfg.horas[s].join("-") : "", feriado:isHoliday(k)}; }),
+    tarefasPorFazer:live("tarefas").filter(x => !x.feito).slice(0, 60).map(x => ({id:x.id, t:x.t, data:x.data || "", hora:x.hora || ""})),
+    compromissos:live("eventos").filter(e => e.data >= t && e.data <= addDays(t, 14)).map(e => ({t:e.t, data:e.data, hora:e.hora || ""})),
+    comidaHoje:totaisDia(t), metasComida:S.cfg.metas,
+    treinoHoje:treinosDoDia(t).map(x => x.nome), planoTreino:live("treinos").map(p => ({nome:p.nome, dias:(p.dias || []).map(d => DOW3[d])}))
+  };
+}
+async function executarComando(texto){
+  texto = String(texto || "").trim(); if (!texto) return;
+  if (V.ouvindo){ try{ const r = V.rec; r.onend = r.onresult = r.onerror = null; r.abort(); }catch(e){} V.ouvindo = false; }
+  V.texto = texto; V.erro = ""; V.estado = "A tratar do pedido…"; V.resposta = ""; V.feitos = []; V.undo = []; vozUI();
+  let out = null;
+  if (syncOn()){
+    try{ out = await api("/api/comando", {texto, ctx:ctxComando()}); }
+    catch(e){ if (!/IA ainda não está ligada|501/.test(e.message)) V.erro = "A IA não respondeu (" + e.message + "). Usei os comandos simples."; }
+  }
+  if (!out || (!out.resposta && !(out.acoes || []).length)) out = comandoLocal(texto) || {resposta:"Não percebi. Experimenta, por exemplo: «gastei 10 euros no café» ou «lembra-me de ligar ao banco amanhã».", acoes:[]};
+  aplicarAcoes(out.acoes || []);
+  V.resposta = out.resposta || (V.feitos.length ? "Feito." : ""); V.estado = "";
+  vozUI(); falar(V.resposta);
+  save(); pendingRender = true;
+}
+function aplicarAcoes(acoes){
+  const t = today();
+  acoes.forEach(a => {
+    if (!a || !a.tipo) return;
+    if (a.tipo === "abrir"){ const sec = String(a.secao || ""); if (ROUTES.some(r => r[0] === sec) || sec === "definicoes"){ location.hash = "#" + sec; } return; }
+    if (a.tipo === "concluir_tarefa"){
+      const x = byId("tarefas", a.id); if (!x || x.feito) return;
+      setTaskDone(a.id, true); V.feitos.push(`Tarefa concluída: ${x.t}`);
+      V.undo.push(() => { const nx = (byId("tarefas", a.id) || {}).gerou; if (nx) remove("tarefas", nx); put("tarefas", {id:a.id, feito:false, gerou:null}); });
+      return;
+    }
+    if (a.tipo === "agua"){
+      const o = byId("agua", t), antes = o && !o.del ? +o.l || 0 : 0, l = Math.max(0, r2(antes + pnum(a.l)));
+      put("agua", {id:t, l, del:false}); V.feitos.push(`Água: +${num(pnum(a.l) * 1000, 0)} ml (total ${num(l, 2)} L)`);
+      V.undo.push(() => put("agua", {id:t, l:antes})); return;
+    }
+    const r = applyItem(a, a.tipo === "gasto" ? "voz" : "ia");
+    if (r){ V.feitos.push(itemTitle(a) + (itemSub(a) ? " · " + itemSub(a) : "")); V.undo.push(() => remove(r[0], r[1])); }
+  });
+}
+function falar(txt){
+  if (!txt || S.cfg.falar === false || !("speechSynthesis" in window)) return;
+  try{
+    speechSynthesis.cancel();
+    const u = new SpeechSynthesisUtterance(txt); u.lang = "pt-PT";
+    const vz = speechSynthesis.getVoices().find(v => /pt[-_]PT/i.test(v.lang)) || speechSynthesis.getVoices().find(v => /^pt/i.test(v.lang));
+    if (vz) u.voice = vz;
+    speechSynthesis.speak(u);
+  }catch(e){}
+}
+/* comandos simples, sem IA */
+const NUMS = {um:1, uma:1, dois:2, duas:2, "três":3, tres:3, quatro:4, cinco:5, seis:6, meio:.5, meia:.5};
+const nW = w => w == null ? 1 : (NUMS[String(w).toLowerCase()] ?? pnum(w)) || 1;
+const cap = s => s ? s[0].toUpperCase() + s.slice(1) : s;
+function comandoLocal(txt){
+  const t = txt.trim().replace(/[.!?]+$/, ""); let m;
+  if ((m = /\b(?:gastei|paguei|gasto de|despesa de)\s+([\d.,]+)\s*(?:€|euros?)?(?:\s*e\s*(\d+)\s*c[eê]ntimos?)?\s*(?:em|no|na|nos|nas|de|do|da|com|para|ao|à)?\s*(.*)$/i.exec(t))){
+    const valor = r2(pnum(m[1]) + (m[2] ? +m[2] / 100 : 0)), desc = cap((m[3] || "Gasto").trim()), cat = guessCat(desc);
+    return {resposta:`Registei ${eur(valor)} em ${cat}.`, acoes:[{tipo:"gasto", valor, desc, cat, data:today()}]};
+  }
+  if ((m = /\bbebi\s+(\w+(?:[.,]\d+)?)?\s*(copos?|garrafas?|garrafinhas?|litros?|l|ml|mililitros?)?\s*(?:de\s+)?[áa]gua/i.exec(t))){
+    const n = nW(m[1]), u = (m[2] || "copo").toLowerCase();
+    const l = /^ml|^mili/.test(u) ? n / 1000 : /^l|^litro/.test(u) ? n : /garrafinha/.test(u) ? n * .33 : /garrafa/.test(u) ? n * .5 : n * .25;
+    return {resposta:`Somei ${num(l * 1000, 0)} mililitros de água.`, acoes:[{tipo:"agua", l}]};
+  }
+  if ((m = /^(?:lembra-me de|lembra-me|lembrar de|lembrar|tenho de|tenho que|preciso de|adiciona(?:r)?(?: a)? tarefa|nova tarefa|tarefa)\s*:?\s+(.+)$/i.exec(t))){
+    const p = parseQuick(m[1]); if (!p.t) return null;
+    return {resposta:`Tarefa criada: ${p.t}${p.data ? ", " + relDate(p.data).toLowerCase() : ""}${p.hora ? " às " + p.hora : ""}.`, acoes:[Object.assign({tipo:"tarefa"}, p)]};
+  }
+  if ((m = /^(?:marca(?:r)?|agenda(?:r)?|novo compromisso|compromisso)\s*:?\s+(.+)$/i.exec(t))){
+    const p = parseQuick(m[1]); if (!p.t) return null;
+    return {resposta:`Marquei ${p.t} ${relDate(p.data || today()).toLowerCase()}${p.hora ? " às " + p.hora : ""}.`, acoes:[{tipo:"evento", t:cap(p.t), data:p.data || today(), hora:p.hora}]};
+  }
+  if ((m = /^(?:comi|almocei|jantei|lanchei|tomei o pequeno-almoço com|pequeno-almoço)\s*:?\s+(.+)$/i.exec(t))){
+    return {resposta:"Registei a refeição. Com a IA ligada também calculo as calorias.", acoes:[{tipo:"refeicao", desc:cap(m[1])}]};
+  }
+  if (/turno|hor[aá]rio|trabalho/i.test(t) && /amanh/i.test(t)){ const s = shiftOf(addDays(today(), 1)); return {resposta:`Amanhã: ${shiftLabel(s).toLowerCase()}${isWork(s) ? ", das " + S.cfg.horas[s].join(" às ") : ""}.`, acoes:[]}; }
+  if (/turno|hor[aá]rio|trabalho/i.test(t) && /hoje/i.test(t)){ const s = shiftOf(today()); return {resposta:`Hoje: ${shiftLabel(s).toLowerCase()}${isWork(s) ? ", das " + S.cfg.horas[s].join(" às ") : ""}.`, acoes:[]}; }
+  if (/quanto\s+(?:é que\s+)?(?:j[aá]\s+)?gastei/i.test(t)){ const g = somaGastos(gastosMes(ym(today()))); return {resposta:`Este mês já gastaste ${eur(g)}${orcTotal() ? ` de ${eur0(orcTotal())}` : ""}.`, acoes:[]}; }
+  return null;
+}
+
+/* ---------- ações ligadas a voz e Google ---------- */
+A["voz-mic"] = () => vozMic();
+A["voz-enviar"] = () => { const i = document.getElementById("vozIn"); if (i && i.value.trim()){ const v = i.value; i.value = ""; executarComando(v); } };
+A["voz-desfazer"] = () => { V.undo.reverse().forEach(f => { try{ f(); }catch(e){} }); V.undo = []; V.feitos = []; V.resposta = "Desfeito."; save(); pendingRender = true; vozUI(); };
+A["gscript"] = async () => {
+  const code = GSCRIPT.replace("__URL__", apiBase()).replace("__CODIGO__", S.local.sync.code);
+  let ok = false;
+  try{ await navigator.clipboard.writeText(code); ok = true; }catch(e){}
+  if (ok) return toast("Script copiado. Cola-o em script.google.com › Novo projeto.");
+  openDlg("Script para a conta Google", `<span class="small muted">Seleciona tudo na caixa (Ctrl+A), copia (Ctrl+C) e cola em script.google.com › Novo projeto.</span><textarea class="input" style="height:260px;padding:10px;font-family:ui-monospace,monospace;font-size:12px" readonly>${esc(code)}</textarea>`, null, "", "", "Fechar");
+};
 
 </script>
 </body>
