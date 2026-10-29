@@ -1677,13 +1677,41 @@ async function executarComando(texto){
   }
   if (!out || (!out.resposta && !(out.acoes || []).length)) out = comandoLocal(texto) || {resposta:"Não percebi. Experimenta, por exemplo: «gastei 10 euros no café» ou «lembra-me de ligar ao banco amanhã».", acoes:[]};
   aplicarAcoes(out.acoes || []);
+  /* a IA respondeu mas não mandou nenhuma ação: tenta os comandos simples */
+  if (!V.feitos.length){ const loc = comandoLocal(texto); if (loc && loc.acoes.length){ aplicarAcoes(loc.acoes); if (!out.resposta) out.resposta = loc.resposta; } }
   V.resposta = out.resposta || (V.feitos.length ? "Feito." : ""); V.estado = "";
   vozUI(); falar(V.resposta);
-  save(); pendingRender = true;
+  save(); render();
+}
+/* aceita pequenas variações no formato das ações e corrige datas */
+const TIPO_ALIAS = {despesa:"gasto", expense:"gasto", compra:"gasto", pagamento:"gasto", task:"tarefa", lembrete:"tarefa", "refeição":"refeicao", comida:"refeicao", compromisso:"evento", event:"evento", "água":"agua", water:"agua"};
+function normData(v){
+  const t = today(), s = String(v || "").trim().toLowerCase();
+  if (!s || s === "hoje" || s === "today") return t;
+  if (s === "amanhã" || s === "amanha" || s === "tomorrow") return addDays(t, 1);
+  if (s === "ontem" || s === "yesterday") return addDays(t, -1);
+  let m = /^(\d{4})-(\d{1,2})-(\d{1,2})/.exec(s);
+  if (m) return `${m[1]}-${pad(+m[2])}-${pad(+m[3])}`;
+  m = /^(\d{1,2})[\/.-](\d{1,2})(?:[\/.-](\d{2,4}))?/.exec(s);
+  if (m){ let y = m[3] ? +m[3] : +t.slice(0, 4); if (y < 100) y += 2000; return `${y}-${pad(+m[2])}-${pad(+m[1])}`; }
+  return t;
+}
+function normAcao(a){
+  if (!a || typeof a !== "object") return null;
+  a = Object.assign({}, a.dados || a.item || a.dados_item || {}, a);
+  let tipo = String(a.tipo || a.type || a.acao || "").toLowerCase();
+  tipo = TIPO_ALIAS[tipo] || tipo; a.tipo = tipo;
+  if (["gasto","evento","refeicao","saude"].includes(tipo)) a.data = normData(a.data);
+  if (tipo === "tarefa" && a.data) a.data = normData(a.data);
+  if (tipo === "gasto"){ a.valor = Math.abs(pnum(a.valor ?? a.montante ?? a.total ?? a.preco)); a.desc = a.desc || a.descricao || a.comerciante || a.loja || "Gasto"; a.cat = a.cat || a.categoria; if (!a.valor) return null; }
+  if (tipo === "tarefa") a.t = a.t || a.titulo || a.texto || a.desc;
+  if (tipo === "evento") a.t = a.t || a.titulo || a.desc;
+  if (tipo === "agua") a.l = pnum(a.l ?? a.litros) || (pnum(a.ml) / 1000) || .25;
+  return a;
 }
 function aplicarAcoes(acoes){
   const t = today();
-  acoes.forEach(a => {
+  (Array.isArray(acoes) ? acoes : []).map(normAcao).forEach(a => {
     if (!a || !a.tipo) return;
     if (a.tipo === "abrir"){ const sec = String(a.secao || ""); if (ROUTES.some(r => r[0] === sec) || sec === "definicoes"){ location.hash = "#" + sec; } return; }
     if (a.tipo === "concluir_tarefa"){
