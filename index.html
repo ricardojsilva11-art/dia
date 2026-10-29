@@ -208,12 +208,14 @@ svg{flex-shrink:0}
 .dmeta{display:flex; align-items:center; gap:3px; min-height:16px}
 .dn{font-style:normal; min-width:16px; height:16px; padding:0 4px; border-radius:8px; background:var(--violet-soft); color:var(--violet-ink); font-size:10px; font-weight:800; display:inline-flex; align-items:center; justify-content:center}
 .dn.late{background:var(--red-soft); color:var(--red)}
+.dfoot{display:contents} .dlab{display:none}
 .dpick{position:relative; width:44px; height:44px; border-radius:22px; background:var(--soft); display:inline-flex; align-items:center; justify-content:center; cursor:pointer; flex-shrink:0}
 .dpick input{position:absolute; inset:0; opacity:0; cursor:pointer; width:100%; height:100%}
 .week{display:grid; grid-template-columns:repeat(7,minmax(0,1fr)); gap:8px}
 .wd{border-radius:16px; padding:10px; background:var(--soft); display:flex; flex-direction:column; gap:6px; align-items:flex-start; min-width:0; border:0; text-align:left}
 .wd.today{background:var(--inv); color:var(--on-inv)}
 .wd .xs{color:var(--muted)} .wd.today .xs{color:var(--inv-muted)}
+.wd.sel{outline:2px solid var(--ink); outline-offset:-2px}
 .spark{display:flex; align-items:flex-end; gap:6px; height:52px}
 .spark i{flex:1; border-radius:6px; background:var(--soft); min-height:3px}
 .spark i.on{background:var(--ink)}
@@ -353,7 +355,8 @@ pre{white-space:pre-wrap; overflow-wrap:anywhere; background:var(--soft); paddin
   .big{font-size:32px}
   .week{gap:5px} .wd{padding:8px 4px; align-items:center; border-radius:14px} .wd .hide-m{display:none}
   .day{min-height:58px; padding:5px; border-radius:11px} .day .evs{display:none}
-  .daybar{padding:6px; gap:4px; flex-wrap:wrap} .daybar .iconbtn{width:36px; height:36px} .dstrip{gap:2px; order:0} .dbtn{padding:6px 0} .dbtn b{font-size:16px} .dpick{width:36px; height:36px}
+  .daybar{padding:6px; gap:4px; flex-wrap:wrap} .daybar .iconbtn{width:34px; height:34px} .dstrip{gap:2px} .dbtn{padding:6px 0} .dbtn b{font-size:16px}
+  .dfoot{display:flex; align-items:center; gap:8px; flex-basis:100%; padding:2px 6px 0} .dlab{display:block; flex:1; font-size:13px; font-weight:700; color:var(--muted)} .dpick{width:34px; height:34px} .dfoot .btn{height:34px}
   .day.tday{min-height:64px} .tcount b{min-width:18px; height:18px; padding:0 4px}
   .cal,.cal-head{gap:5px}
   .timeline{height:118px}
@@ -396,7 +399,7 @@ pre{white-space:pre-wrap; overflow-wrap:anywhere; background:var(--soft); paddin
 /* ============================================================
    dia. — núcleo: dados, datas, sincronização, horário
    ============================================================ */
-const APP_VERSION = "2.5 · 29/10/2026";
+const APP_VERSION = "2.6 · 29/10/2026";
 const KEY = "dia-app-v1";
 const VENC_KEY = "vencimento-app-v1";
 const COLS = ["tarefas","eventos","gastos","fixos","refeicoes","agua","treinos","sessoes","inbox","turnos","saude","poupObj","poupMov","poupAuto"];
@@ -854,12 +857,15 @@ function applyTheme(){
   const dark = t === "dark" || (t !== "light" && matchMedia("(prefers-color-scheme: dark)").matches);
   $("#themeColor").setAttribute("content", dark ? "#0E0E11" : "#F6F4EF");
 }
+/* dia escolhido na barra do topo — partilhado por todos os separadores */
+function diaSel(){ const t = today(); if (UI.diaEm !== t){ UI.dia = t; UI.diaEm = t; } return UI.dia || t; }
+function setDia(k){ if (!k) return; UI.dia = k; UI.tDia = k; UI.tMes = ym(k); UI.horMes = ym(k); UI.gasMes = ym(k); UI.comDia = k; render(); }
 function render(){
   pendingRender = false;
   applyTheme(); renderNav(); refreshSyncUI();
   const r = route();
   const v = {hoje:vHoje, tarefas:vTarefas, horario:vHorario, treino:vTreino, comida:vComida, gastos:vGastos, poupanca:vPoup, definicoes:vDef}[r];
-  $("#view").innerHTML = v();
+  $("#view").innerHTML = (r === "definicoes" ? "" : dayBar(diaSel())) + v();
   document.title = r === "hoje" ? "dia." : `${(ROUTES.find(x => x[0] === r) || [0, "Definições"])[1]} · dia.`;
 }
 
@@ -967,14 +973,14 @@ function dayBar(k){
     <button class="iconbtn" type="button" data-a="hsem" data-v="-7" aria-label="Semana anterior">${ic("left")}</button>
     <div class="dstrip">${dias}</div>
     <button class="iconbtn" type="button" data-a="hsem" data-v="7" aria-label="Semana seguinte">${ic("right")}</button>
+    <div class="dfoot"><span class="dlab">${longDate(k)}</span>
     <label class="dpick" title="Escolher outra data">${ic("cal", 18)}<span class="sr">Escolher data</span><input type="date" data-c="hdia-pick" value="${k}"></label>
-    ${k !== t ? `<button class="btn sm" type="button" data-a="hdia" data-k="${t}">Hoje</button>` : ""}
+    ${k !== t ? `<button class="btn sm" type="button" data-a="hdia" data-k="${t}">Hoje</button>` : ""}</div>
   </section>`;
 }
 function vHoje(){
   const t = today(), h = new Date().getHours(), nm = nowMin();
-  if (UI.hojeDiaEm !== t){ UI.hojeDia = t; UI.hojeDiaEm = t; }
-  const k = UI.hojeDia || t, isT = k === t;
+  const k = diaSel(), isT = k === t;
   const hi = h < 6 ? "Boa noite" : h < 13 ? "Bom dia" : h < 20 ? "Boa tarde" : "Boa noite";
   const nome = (S.cfg.nome || "").trim().split(" ")[0];
   const s = shiftOf(k);
@@ -1029,7 +1035,6 @@ function vHoje(){
   const sau = isT ? (S.saude.find(x => x.id === addDays(t, -1) && !x.del) || S.saude.find(x => x.id === t && !x.del)) : S.saude.find(x => x.id === k && !x.del);
   const quando = isT ? "hoje" : k === addDays(t, 1) ? "amanhã" : k === addDays(t, -1) ? "ontem" : "neste dia";
   return `
-  ${dayBar(k)}
   <section class="hero">
     <div class="hero-text">
       <p class="small muted" style="margin:0;font-weight:600">${longDate(k)}${isT ? "" : " · " + relDate(k)}</p>
@@ -1148,7 +1153,7 @@ function vTarefas(){
 /* calendário das tarefas: escolhe o dia e vê o que tens */
 function tarefasCalendario(){
   const t = today();
-  if (!UI.tDia) UI.tDia = t;
+  UI.tDia = diaSel();
   const sel = UI.tDia, mes = UI.tMes || ym(sel);
   const [Y, Mo] = mes.split("-").map(Number), nd = new Date(Y, Mo, 0).getDate(), off = (new Date(Y, Mo - 1, 1).getDay() + 6) % 7;
   const tar = live("tarefas"), evs = live("eventos");
@@ -1210,7 +1215,7 @@ function vHorario(){
     if (s) cnt[s] = (cnt[s] || 0) + 1;
     if (hol && isWork(s)) ferT.push(k);
     const e = evs.filter(x => x.data === k);
-    cells += `<button type="button" class="day ${hol ? "hol" : ""} ${k === t ? "today" : ""}" data-a="day" data-k="${k}" aria-label="${longDate(k)}: ${shiftLabel(s)}${hol ? ", feriado" : ""}${e.length ? `, ${e.length} compromisso(s)` : ""}">
+    cells += `<button type="button" class="day ${hol ? "hol" : ""} ${k === t ? "today" : ""} ${k === UI.dia && k !== t ? "sel" : ""}" data-a="day" data-k="${k}" aria-label="${longDate(k)}: ${shiftLabel(s)}${hol ? ", feriado" : ""}${e.length ? `, ${e.length} compromisso(s)` : ""}">
       <span class="n">${d}${shiftSource(k) === "manual" ? " •" : ""}</span><span class="chip ${chipCls(s)}">${chipTxt(s)}</span>${e.length ? `<span class="evs">${esc(e[0].hora || "")} ${esc(e[0].t)}${e.length > 1 ? ` +${e.length - 1}` : ""}</span>` : ""}</button>`;
   }
   const monthEvs = evs.filter(x => ym(x.data) === UI.horMes).sort((a, b) => (a.data + (a.hora || "")).localeCompare(b.data + (b.hora || "")));
@@ -1248,23 +1253,23 @@ function vHorario(){
 
 /* ---------- TREINO ---------- */
 function vTreino(){
-  const t = today(), plano = live("treinos");
-  const monday = addDays(t, -((pdk(t).getDay() + 6) % 7));
+  const t = today(), d0 = diaSel(), isT = d0 === t, plano = live("treinos");
+  const monday = addDays(d0, -((pdk(d0).getDay() + 6) % 7));
   const week = Array.from({length:7}, (_, i) => addDays(monday, i)).map(k => {
     const s = shiftOf(k), trs = treinosDoDia(k), done = trs.length && trs.every(x => (sessao(k, x.id) || {}).feito);
-    return `<div class="wd ${k === t ? "today" : ""}"><span class="xs">${DOW3[pdk(k).getDay()]} · <span class="chip ${chipCls(s)}" style="padding:1px 6px">${chipTxt(s)}</span></span>
+    return `<div class="wd ${k === t ? "today" : ""} ${k === d0 && !isT ? "sel" : ""}"><span class="xs">${DOW3[pdk(k).getDay()]} · <span class="chip ${chipCls(s)}" style="padding:1px 6px">${chipTxt(s)}</span></span>
       <b class="small hide-m">${trs.length ? esc(trs.map(x => x.nome).join(" + ")) : "Descanso"}${done ? " ✓" : ""}</b>
       <span class="show-m">${trs.length ? `<span class="chip ${done ? "c-ok" : "c-ia"}" style="padding:1px 6px" title="${esc(trs.map(x => x.nome).join(" + "))}">${done ? "✓" : "T"}</span>` : '<span class="xs muted">—</span>'}</span>
       <span class="xs hide-m">${trs.length ? (s === "N" ? "Noite: leve ou descanso" : esc(trs[0].hora || S.cfg.treinoHora)) : ""}</span></div>`;
   }).join("");
-  const hojeTr = treinosDoDia(t);
-  const selId = UI.treinoSel[t] || (hojeTr[0] && hojeTr[0].id) || (plano[0] && plano[0].id);
+  const hojeTr = treinosDoDia(d0);
+  const selId = UI.treinoSel[d0] || (hojeTr[0] && hojeTr[0].id) || (plano[0] && plano[0].id);
   const sel = plano.find(x => x.id === selId);
   let sessHtml = '<div class="empty">Cria um treino para começares a registar.</div>';
   if (sel){
-    const ses = sessao(t, sel.id) || {kg:{}, ok:{}};
+    const ses = sessao(d0, sel.id) || {kg:{}, ok:{}};
     sessHtml = `<div class="exlist">${(sel.ex || []).map((e, i) => {
-        const reps = repsSeries(e), last = ultimasSeries(sel.id, i, t), cur = (ses.sets && ses.sets[i]) || [];
+        const reps = repsSeries(e), last = ultimasSeries(sel.id, i, d0), cur = (ses.sets && ses.sets[i]) || [];
         const lastTxt = last ? (last.sets ? last.sets.map(v => v == null || v === "" ? "—" : num(v)).join(" · ") : num(last.kg)) + " kg" : "";
         return `<div class="ex ${ses.ok && ses.ok[i] ? "ex-ok" : ""}">
           <div class="ex-head"><div class="grow"><b>${esc(e.n)}</b><div class="xs muted">${reps.length} séries · ${esc(reps.join("/"))} reps${lastTxt ? ` · última vez (${shortDate(last.data)}): ${esc(lastTxt)}` : ""}</div></div>
@@ -1309,10 +1314,10 @@ function vTreino(){
   <div class="row">
     <div class="main-col">
       <section class="card">
-        <div class="card-head"><h2>Hoje${sel ? " · " + esc(sel.nome) : ""}</h2>
+        <div class="card-head"><h2>${isT ? "Hoje" : relDate(d0)}${sel ? " · " + esc(sel.nome) : ""}</h2>
           ${plano.length > 1 ? `<label class="small muted" style="display:flex;gap:8px;align-items:center">Treino <select class="input" style="width:auto;height:38px" data-c="treino-sel">${plano.map(p => `<option value="${p.id}" ${p.id === selId ? "selected" : ""}>${esc(p.nome)}</option>`).join("")}</select></label>` : ""}</div>
-        ${shiftOf(t) === "N" ? '<span class="chip c-N" style="align-self:flex-start">Hoje é noite: treino leve ou descanso</span>' : ""}
-        ${sel && !hojeTr.length ? '<span class="small muted">Hoje não tens treino planeado. Se treinares, escolhe o treino e regista as cargas.</span>' : ""}
+        ${shiftOf(d0) === "N" ? `<span class="chip c-N" style="align-self:flex-start">${isT ? "Hoje é" : "Dia de"} noite: treino leve ou descanso</span>` : ""}
+        ${sel && !hojeTr.length ? `<span class="small muted">${isT ? "Hoje não tens" : "Neste dia não tens"} treino planeado. Se treinares, escolhe o treino e regista as cargas.</span>` : ""}
         ${sessHtml}
       </section>
       <section class="card">
@@ -1331,18 +1336,15 @@ function vTreino(){
 
 /* ---------- COMIDA ---------- */
 function vComida(){
-  const t = today(); if (!UI.comDia) UI.comDia = t;
+  const t = today(); UI.comDia = diaSel();
   const k = UI.comDia, tot = totaisDia(k), M = S.cfg.metas;
   const pct = Math.min(1, M.kcal ? tot.kcal / M.kcal : 0), C = 2 * Math.PI * 50;
   const meals = refeicoesDia(k);
   const days = Array.from({length:7}, (_, i) => addDays(k, i - 6)).map(d => ({d, v:totaisDia(d).kcal}));
   const mx = Math.max(M.kcal, ...days.map(x => x.v));
   return `
-  <div class="page-head"><div><p>Objetivo: ${M.kcal} kcal · ${M.p} g proteína</p><h1>Comida</h1></div>
+  <div class="page-head"><div><p>${relDate(k)} · objetivo ${M.kcal} kcal · ${M.p} g proteína</p><h1>Comida</h1></div>
     <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
-      <button class="iconbtn" type="button" data-a="cd" data-v="-1" aria-label="Dia anterior">${ic("left")}</button>
-      <b style="min-width:110px;text-align:center">${relDate(k)}</b>
-      <button class="iconbtn" type="button" data-a="cd" data-v="1" aria-label="Dia seguinte" ${k >= t ? "disabled" : ""}>${ic("right")}</button>
       <button class="btn" type="button" data-a="add-refeicao">+ Refeição</button></div></div>
   <div class="row">
     <div class="main-col">
@@ -1385,6 +1387,9 @@ function vGastos(){
   const colors = ["var(--violet)","var(--sky)","var(--coral)","var(--green)","var(--amber-ink)","var(--violet-ink)","var(--muted)"];
   const groups = {}; arr.forEach(g => (groups[g.data] = groups[g.data] || []).push(g));
   const warn = catList.filter(c => S.cfg.orc[c] && (byCat[c] || 0) / S.cfg.orc[c] >= .9);
+  const kd = diaSel(), gd = live("gastos").filter(g => g.data === kd).sort((a, b) => b.upd - a.upd);
+  const diaCard = `<section class="card" aria-label="Gastos do dia escolhido"><div class="card-head"><div><h2>${kd === t ? "Hoje" : relDate(kd)}</h2><span class="xs muted">${longDate(kd)}</span></div><span class="mid">${eur(somaGastos(gd))}</span></div>
+    <div class="list">${gd.map(g => `<button type="button" class="item" data-a="edit-gasto" data-id="${g.id}" style="width:100%;text-align:left;border:0;background:transparent;color:inherit"><div class="grow"><div class="t">${esc(g.desc || g.cat || "Gasto")}</div><div class="s">${esc(g.cat || "Outros")}</div></div><b class="small">${eur(+g.valor || 0)}</b></button>`).join("") || '<div class="empty">Sem gastos neste dia.</div>'}</div></section>`;
   return `
   <div class="page-head"><div><p>${cur ? `Faltam ${left} dia${left === 1 ? "" : "s"} para o fim do mês` : "Mês fechado"}</p><h1>Gastos</h1></div>
     <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
@@ -1409,6 +1414,7 @@ function vGastos(){
   </div>
   <div class="row">
     <div class="main-col">
+      ${diaCard}
       <section class="card">
         <div class="card-head"><h2>Por categoria</h2><button class="linkbtn" type="button" data-a="orc">Editar orçamento</button></div>
         <div class="catrow">${catList.map((c, i) => { const v = byCat[c] || 0, b = +S.cfg.orc[c] || 0, p = b ? v / b : 0; return `<span style="font-weight:700">${esc(c)}</span><div class="bar"><i style="width:${Math.min(100, p * 100).toFixed(0)}%;background:${p >= 1 ? "var(--red)" : colors[i % colors.length]}"></i></div><span style="text-align:right"><b>${eur(v)}</b>${b ? ` / ${eur0(b)}` : ""}</span>`; }).join("")}</div>
@@ -1704,7 +1710,7 @@ function guessRefTipo(hm){ const m = hm2m(hm) ?? nowMin(); return m < 630 ? "Peq
 function dlgGasto(g = {}){
   openDlg(g.id ? "Editar gasto" : "Novo gasto", `<div class="fields">
     <label class="field">Valor (€)<input name="valor" inputmode="decimal" required value="${g.valor != null ? esc(num(g.valor, 2)) : ""}" placeholder="0,00"></label>
-    <label class="field">Data<input type="date" name="data" required value="${esc(g.data || today())}"></label></div>
+    <label class="field">Data<input type="date" name="data" required value="${esc(g.data || diaSel())}"></label></div>
     <label class="field">Descrição<input name="desc" value="${esc(g.desc || "")}" placeholder="Ex.: Pingo Doce"></label>
     <label class="field">Categoria<select name="cat">${opt(cats(), g.cat || "Supermercado")}</select></label>`,
   o => { const v = pnum(o.valor); if (!v) throw new Error("Indica o valor."); put("gastos", {id:g.id, valor:v, data:o.data, desc:o.desc.trim(), cat:o.cat, origem:g.origem || "manual"}); save(); render(); toast("Gasto guardado."); });
@@ -1719,7 +1725,7 @@ function dlgTarefa(x = {}){
 }
 function dlgEvento(e = {}, k){
   openDlg("Novo compromisso", `<label class="field">O quê<input name="t" required value="${esc(e.t || "")}" placeholder="Ex.: Dentista"></label>
-    <div class="fields"><label class="field">Data<input type="date" name="data" required value="${esc(e.data || k || today())}"></label><label class="field">Hora<input type="time" name="hora" value="${esc(e.hora || "")}"></label><label class="field">Duração (min)<input name="dur" inputmode="numeric" value="${esc(e.dur || 60)}"></label></div>`,
+    <div class="fields"><label class="field">Data<input type="date" name="data" required value="${esc(e.data || k || diaSel())}"></label><label class="field">Hora<input type="time" name="hora" value="${esc(e.hora || "")}"></label><label class="field">Duração (min)<input name="dur" inputmode="numeric" value="${esc(e.dur || 60)}"></label></div>`,
   o => { put("eventos", {id:e.id, t:o.t.trim(), data:o.data, hora:o.hora, dur:Math.max(5, pnum(o.dur) || 60)}); save(); render(); toast("Compromisso guardado."); });
 }
 function dlgRefeicao(r = {}){
@@ -1800,9 +1806,9 @@ function dlgMov(objId, sinal = 1, valor){
   const objs = live("poupObj");
   if (!objs.length) return dlgObj();
   openDlg(sinal > 0 ? "Depositar na poupança" : "Retirar da poupança", `<label class="field">Objetivo<select name="obj">${opt(objs.map(o => [o.id, o.nome]), objId || objs[0].id)}</select></label>
-    <div class="fields"><label class="field">Valor (€)<input name="valor" inputmode="decimal" required value="${valor ? esc(num(valor, 2)) : ""}"></label><label class="field">Data<input type="date" name="data" value="${today()}"></label></div>
+    <div class="fields"><label class="field">Valor (€)<input name="valor" inputmode="decimal" required value="${valor ? esc(num(valor, 2)) : ""}"></label><label class="field">Data<input type="date" name="data" value="${diaSel()}"></label></div>
     <label class="field">Nota<input name="nota" placeholder="Opcional"></label>`,
-  v => { const x = Math.abs(pnum(v.valor)); if (!x) throw new Error("Indica o valor."); put("poupMov", {obj:v.obj, data:v.data || today(), valor:sinal * x, nota:v.nota.trim(), origem:"manual"}); save(); render(); toast(sinal > 0 ? "Depósito registado." : "Levantamento registado."); }, sinal > 0 ? "Depositar" : "Retirar");
+  v => { const x = Math.abs(pnum(v.valor)); if (!x) throw new Error("Indica o valor."); put("poupMov", {obj:v.obj, data:v.data || diaSel(), valor:sinal * x, nota:v.nota.trim(), origem:"manual"}); save(); render(); toast(sinal > 0 ? "Depósito registado." : "Levantamento registado."); }, sinal > 0 ? "Depositar" : "Retirar");
 }
 async function analisarGastos(){
   if (!syncOn()){ toast("A análise usa a IA: liga primeiro o servidor nas Definições."); return; }
@@ -1903,14 +1909,14 @@ function applyItem(it, origem = "ia"){
 const A = {
   "del": el => { const c = el.dataset.col; remove(c, el.dataset.id); save(); render(); toast("Apagado."); },
   "tf": el => { UI.tarefasFiltro = el.dataset.v; render(); },
-  "hdia": el => { UI.hojeDia = el.dataset.k; render(); },
-  "hsem": el => { UI.hojeDia = addDays(UI.hojeDia || today(), +el.dataset.v); render(); },
-  "ver-tarefas-dia": el => { UI.tarefasFiltro = "dia"; UI.tDia = el.dataset.k; UI.tMes = ym(el.dataset.k); location.hash = "#tarefas"; },
+  "hdia": el => setDia(el.dataset.k),
+  "hsem": el => setDia(addDays(diaSel(), +el.dataset.v)),
+  "ver-tarefas-dia": el => { UI.tarefasFiltro = "dia"; UI.dia = el.dataset.k; location.hash = "#tarefas"; },
   "add-evento-dia": el => dlgEvento({}, el.dataset.k),
   "add-gasto-dia": el => dlgGasto({data:el.dataset.k}),
   "add-refeicao-dia": el => { UI.comDia = el.dataset.k; dlgRefeicao({data:el.dataset.k}); },
-  "tdia": el => { UI.tDia = el.dataset.k; UI.tMes = ym(el.dataset.k); render(); },
-  "tdia-mv": el => { UI.tDia = addDays(UI.tDia || today(), +el.dataset.v); UI.tMes = ym(UI.tDia); render(); },
+  "tdia": el => setDia(el.dataset.k),
+  "tdia-mv": el => setDia(addDays(diaSel(), +el.dataset.v)),
   "tmes": el => { const d = pdk((UI.tMes || ym(UI.tDia || today())) + "-01"); d.setMonth(d.getMonth() + (+el.dataset.v)); UI.tMes = ym(dk(d)); render(); },
   "edit-tarefa": el => dlgTarefa(byId("tarefas", el.dataset.id)),
   "add-gasto": () => dlgGasto(), "edit-gasto": el => dlgGasto(byId("gastos", el.dataset.id)),
@@ -1930,7 +1936,7 @@ const A = {
   "agua": el => { const k = el.dataset.k, o = byId("agua", k); const l = Math.max(0, r2((o && !o.del ? +o.l || 0 : 0) + (+el.dataset.v))); put("agua", {id:k, l, del:false}); save(); render(); },
   "evo-modo": el => { UI.evoModo = el.dataset.v; render(); },
   "sets-copy": el => {
-    const t = today(), tid = el.dataset.tid, i = el.dataset.i, box = el.closest(".ex"), ins = box ? [...box.querySelectorAll('[data-c="setkg"]')] : [];
+    const t = diaSel(), tid = el.dataset.tid, i = el.dataset.i, box = el.closest(".ex"), ins = box ? [...box.querySelectorAll('[data-c="setkg"]')] : [];
     const v = ins.length && ins[0].value.trim(); if (!v){ toast("Escreve primeiro o peso da 1.ª série."); return; }
     const s = sessao(t, tid) || {id:`${t}|${tid}`, data:t, treinoId:tid, kg:{}, ok:{}, sets:{}};
     const sets = JSON.parse(JSON.stringify(s.sets || {})); sets[i] = ins.map(() => pnum(v));
@@ -1938,7 +1944,7 @@ const A = {
     put("sessoes", Object.assign({}, s, {sets, kg, ok})); save(); render();
   },
   "plano-exemplo": () => { PLANO_EXEMPLO.forEach(p => put("treinos", JSON.parse(JSON.stringify(Object.assign({hora:S.cfg.treinoHora}, p))))); save(); render(); toast("Plano de exemplo criado. Ajusta os dias ao teu horário."); },
-  "ses-done": el => { const t = today(), tid = el.dataset.tid, s = sessao(t, tid) || {id:`${t}|${tid}`, data:t, treinoId:tid, kg:{}, ok:{}}; put("sessoes", Object.assign({}, s, {feito:!s.feito})); save(); render(); if (!s.feito) toast("Bom treino! Registado."); },
+  "ses-done": el => { const t = diaSel(), tid = el.dataset.tid, s = sessao(t, tid) || {id:`${t}|${tid}`, data:t, treinoId:tid, kg:{}, ok:{}}; put("sessoes", Object.assign({}, s, {feito:!s.feito})); save(); render(); if (!s.feito) toast("Bom treino! Registado."); },
   "inbox-ok": el => { const x = byId("inbox", el.dataset.id); if (x){ applyItem(x.dados || {}, (x.dados && x.dados.origem) || "auto"); put("inbox", {id:x.id, estado:"ok"}); save(); render(); toast("Registado."); } },
   "inbox-no": el => { put("inbox", {id:el.dataset.id, estado:"rejeitado"}); save(); render(); },
   "ai-add": el => { const f = UI.ai[el.dataset.sec][+el.dataset.i], it = f.itens[+el.dataset.j]; applyItem(it); it._ok = true; save(); render(); toast("Adicionado."); },
@@ -1999,7 +2005,7 @@ $("#micBtn").addEventListener("click", abrirVoz);
 /* ---------- alterações em campos ---------- */
 document.addEventListener("change", e => {
   const el = e.target, c = el.dataset && el.dataset.c; if (!c) return;
-  const t = today();
+  const t = /^(kg|exok|setkg|treino-sel)$/.test(c) ? diaSel() : today();
   if (c === "task-done"){ setTaskDone(el.dataset.id, el.checked); save(); setTimeout(render, 180); }
   else if (c === "ai-pick"){ aiFiles(el.files, el.dataset.sec); el.value = ""; }
   else if (c === "kg" || c === "exok"){
@@ -2019,7 +2025,7 @@ document.addEventListener("change", e => {
     save();
     if (ok[i] && !(s.ok || {})[i]){ const box = el.closest(".ex"); if (box){ box.classList.add("ex-ok"); const cb = box.querySelector('[data-c="exok"]'); if (cb) cb.checked = true; } }
   }
-  else if (c === "hdia-pick"){ if (el.value){ UI.hojeDia = el.value; render(); } }
+  else if (c === "hdia-pick"){ if (el.value) setDia(el.value); }
   else if (c === "treino-sel"){ UI.treinoSel[t] = el.value; render(); }
   else if (c === "ex-sel"){ UI.exSel = el.value; render(); }
   else if (c === "evo-sel"){ UI.evoTreino = el.value; render(); }
