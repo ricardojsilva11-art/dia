@@ -360,7 +360,7 @@ pre{white-space:pre-wrap; overflow-wrap:anywhere; background:var(--soft); paddin
   .day.tday{min-height:64px} .tcount b{min-width:18px; height:18px; padding:0 4px}
   .cal,.cal-head{gap:5px}
   .timeline{height:118px}
-  .bottomnav{display:grid; grid-template-columns:repeat(7,minmax(0,1fr)); position:fixed; left:12px; right:12px; bottom:calc(14px + env(safe-area-inset-bottom)); height:64px; border-radius:32px; background:#16161A; z-index:40; align-items:center; padding:0 6px; box-shadow:0 10px 30px rgba(0,0,0,.25)}
+  .bottomnav{display:grid; grid-template-columns:repeat(6,minmax(0,1fr)); position:fixed; left:12px; right:12px; bottom:calc(14px + env(safe-area-inset-bottom)); height:64px; border-radius:32px; background:#16161A; z-index:40; align-items:center; padding:0 6px; box-shadow:0 10px 30px rgba(0,0,0,.25)}
   :root[data-theme="dark"] .bottomnav{background:#26262E}
   .bottomnav a{justify-self:center; width:44px; height:44px; border-radius:22px; color:#BDBDC4; display:flex; align-items:center; justify-content:center}
   .bottomnav a[aria-current="page"]{background:var(--accent); color:#16161A}
@@ -399,7 +399,7 @@ pre{white-space:pre-wrap; overflow-wrap:anywhere; background:var(--soft); paddin
 /* ============================================================
    dia. — núcleo: dados, datas, sincronização, horário
    ============================================================ */
-const APP_VERSION = "2.6 · 29/10/2026";
+const APP_VERSION = "2.7 · 29/10/2026";
 const KEY = "dia-app-v1";
 const VENC_KEY = "vencimento-app-v1";
 const COLS = ["tarefas","eventos","gastos","fixos","refeicoes","agua","treinos","sessoes","inbox","turnos","saude","poupObj","poupMov","poupAuto"];
@@ -833,7 +833,7 @@ const IC = {
   cal:'<rect x="3" y="4" width="18" height="17" rx="2"/><path d="M3 9h18M8 2v4M16 2v4M8 14h3"/>'
 };
 const ic = (n, s = 20, sw = 2) => `<svg width="${s}" height="${s}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="${sw}" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${IC[n]}</svg>`;
-const ROUTES = [["hoje","Hoje"],["tarefas","Tarefas"],["horario","Horário"],["treino","Treino"],["comida","Comida"],["gastos","Gastos"],["poupanca","Poupança"]];
+const ROUTES = [["hoje","Hoje"],["tarefas","Tarefas"],["horario","Horário"],["treino","Treino"],["gastos","Gastos"],["poupanca","Poupança"]];
 const UI = { tarefasFiltro:"dia", horMes:null, gasMes:null, comDia:null, treinoSel:{}, exSel:null, ai:{} };
 const route = () => { const r = (location.hash || "#hoje").slice(1).split("?")[0]; return ROUTES.some(x => x[0] === r) || r === "definicoes" ? r : "hoje"; };
 
@@ -941,7 +941,6 @@ function dayItems(k){
   if (r) out.push({cls:"tl-shift", nome:`Turno ${s} · ${m2hm(r[0])}–${m2hm(r[1])}`, ini:r[0], fim:Math.min(r[1], 1440), kind:"turno"});
   live("eventos").filter(e => e.data === k && e.hora).forEach(e => { const a = hm2m(e.hora); out.push({cls:"tl-ev", nome:e.t, ini:a, fim:a + (+e.dur || 60), kind:"ev"}); });
   treinosDoDia(k).forEach(tr => { const a = hm2m(tr.hora || S.cfg.treinoHora) ?? 1050; const ses = sessao(k, tr.id); out.push({cls:"tl-tr", nome:/^treino/i.test(tr.nome) ? tr.nome : "Treino · " + tr.nome, ini:a, fim:a + 60, kind:"tr", done:ses && ses.feito}); });
-  refeicoesDia(k).filter(r => r.hora).forEach(rf => { const a = hm2m(rf.hora); out.push({cls:"tl-food", nome:rf.tipo || "Refeição", ini:a, fim:a + 30, kind:"food"}); });
   return out.filter(x => x.ini != null);
 }
 function heroSentence(k){
@@ -1076,12 +1075,6 @@ function vHoje(){
         <span class="small muted">${trs.reduce((a, x) => a + (x.ex || []).length, 0)} exercícios${s === "N" ? " · dia de noite: faz leve ou descansa" : ""}</span>
         <a class="btn acc" href="#treino" style="margin-top:auto">${trs.every(x => (sessao(k, x.id) || {}).feito) ? "Feito ✓ · ver" : isT ? "Começar" : "Ver treino"}</a>`
       : `<div class="mid">Descanso</div><span class="small muted">${live("treinos").length ? "Nenhum treino planeado " + (isT ? "para hoje." : "neste dia.") : "Ainda não tens plano de treino."}</span><a class="btn acc" href="#treino" style="margin-top:auto">${live("treinos").length ? "Ver plano" : "Criar plano"}</a>`}
-    </div>
-    <div class="card">
-      <div class="card-head"><h2>Comida</h2><button class="linkbtn" type="button" data-a="add-refeicao-dia" data-k="${k}">+ Refeição</button></div>
-      <div style="display:flex;align-items:baseline;gap:6px"><span class="big">${Math.round(Math.max(0, M.kcal - tot.kcal))}</span><span class="small muted">kcal restantes</span></div>
-      ${macrosHtml(tot)}
-      <div style="display:flex;gap:8px;align-items:center"><button class="btn sm ghost" type="button" data-a="agua" data-v="0.25" data-k="${k}">${ic("drop", 16)} +250 ml</button><span class="xs muted">${num(tot.agua, 2)} de ${num(M.agua)} L</span></div>
     </div>
   </section>
   ${isT && live("poupObj").length ? `<a class="card" href="#poupanca" style="text-decoration:none;flex-direction:row;flex-wrap:wrap;align-items:center;gap:18px">
@@ -1783,7 +1776,6 @@ function dlgSheet(){
     <button type="button" data-a="sheet" data-v="voz" style="grid-column:1/-1;background:var(--accent);color:var(--on-accent)">${ic("mic", 22)}Falar</button>
     <button type="button" data-a="sheet" data-v="gasto">${ic("gastos", 22)}Gasto</button>
     <button type="button" data-a="sheet" data-v="tarefa">${ic("tarefas", 22)}Tarefa</button>
-    <button type="button" data-a="sheet" data-v="refeicao">${ic("comida", 22)}Refeição</button>
     <button type="button" data-a="sheet" data-v="evento">${ic("cal", 22)}Compromisso</button>
     <button type="button" data-a="sheet" data-v="foto">${ic("cam", 22)}Fotografar documento</button>
     <button type="button" data-a="sheet" data-v="ficheiro">${ic("file", 22)}Escolher ficheiro</button></div>
