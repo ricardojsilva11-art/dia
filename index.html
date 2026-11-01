@@ -415,7 +415,7 @@ pre{white-space:pre-wrap; overflow-wrap:anywhere; background:var(--soft); paddin
 const APP_VERSION = "3.4 · 01/11/2026";
 const KEY = "dia-app-v1";
 const VENC_KEY = "vencimento-app-v1";
-const COLS = ["tarefas","eventos","gastos","fixos","refeicoes","agua","treinos","sessoes","inbox","turnos","saude","poupObj","poupMov","poupAuto","recorr","extras","creditos","credMov","prazos","assinaturas"];
+const COLS = ["tarefas","eventos","gastos","fixos","refeicoes","agua","treinos","sessoes","inbox","turnos","saude","poupObj","poupMov","poupAuto","recorr","extras","creditos","credMov","prazos","assinaturas","carteira","paraCarteira"];
 const DOW = ["Domingo","Segunda","Terça","Quarta","Quinta","Sexta","Sábado"];
 const DOW3 = ["Dom","Seg","Ter","Qua","Qui","Sex","Sáb"];
 const MESES = ["janeiro","fevereiro","março","abril","maio","junho","julho","agosto","setembro","outubro","novembro","dezembro"];
@@ -548,9 +548,11 @@ async function syncNow(manual){
   syncBusy = true; setSyncUI("busy", "A sincronizar…");
   try{
     computeAgendaOut();
+    try{ publicarParaCarteira(); }catch(e){}
     const before = JSON.stringify(payload());
     const j = await api("/api/sync", {data:payload()});
     S = mergeState(S, j.data);
+    try{ if (aplicarInvestimentos()) setTimeout(() => save(), 0); }catch(e){}
     if (ensureRecorr()) setTimeout(() => save(), 0);
     const d = j.data || {}, n = c => (d[c] || []).filter(x => !x.del).length;
     S.local.sync.server = {tarefas:n("tarefas"), gastos:n("gastos"), treinos:n("treinos"), refeicoes:n("refeicoes"), venc:!!d.venc};
@@ -1465,6 +1467,7 @@ function vHoje(){
     <div><div class="small muted" style="font-weight:700">Poupança</div><div class="mid">${eur0(totalPoupado())}</div></div>
     ${live("poupObj").filter(o => +o.alvo > 0).slice(0, 3).map(o => { const v = saldoObj(o.id), p = Math.min(100, v / o.alvo * 100); return `<div style="flex:1 1 180px;min-width:0"><div class="small" style="display:flex;justify-content:space-between;gap:8px"><b>${esc(o.nome)}</b><span class="muted">${Math.round(p)} %</span></div><div class="bar" style="margin-top:6px"><i style="width:${p.toFixed(0)}%;background:var(--green)"></i></div></div>`; }).join("")}
   </a>` : ""}
+  ${isT ? cartCasa() : ""}
   ${sau ? `<section class="inbox-row"><b class="small">Saúde</b>${sau.sono ? `<span class="pill" style="padding-right:14px">Sono ${num(sau.sono)} h</span>` : ""}${sau.passos ? `<span class="pill" style="padding-right:14px">${Math.round(sau.passos).toLocaleString("pt-PT")} passos</span>` : ""}${sau.peso ? `<span class="pill" style="padding-right:14px">${num(sau.peso)} kg</span>` : ""}<span class="xs muted">Apple Saúde · ${relDate(sau.id).toLowerCase()}</span></section>` : ""}
   ${isT ? aiCard("auto", "Larga aqui qualquer documento: a IA percebe se é fatura, escala, plano ou refeição", "Faturas, talões, escalas, planos, fotos de refeições") : ""}
   `;
@@ -1980,6 +1983,56 @@ function copiasCard(){
   </section>`;
 }
 
+
+/* ---------- ligação à app Carteira ----------
+   A Carteira escreve aqui: «carteira» → {id:"resumo"} e {id:"op-…"} (compras/vendas).
+   Esta app escreve: «paraCarteira» → {id:"mes"} com o líquido, os gastos previstos e a poupança do mês. */
+const cartResumo = () => (S.carteira || []).find(x => x.id === "resumo" && !x.del) || null;
+function publicarParaCarteira(){
+  const t = today(), m = ym(t), vm = vencMes(t), pr = previsaoMes();
+  const poupMes = r2(Math.max(0, live("poupMov").filter(x => ym(x.data) === m && x.origem !== "carteira").reduce((a, x) => a + (+x.valor || 0), 0)));
+  const auto = r2(live("poupAuto").filter(a => live("poupObj").some(o => o.id === a.obj)).reduce((a, x) => a + (+x.valor || 0), 0));
+  const novo = {id:"mes", mes:m, liquido:vm ? r2(vm.liquido) : null, gastosPrev:r2(pr.gastos), poupanca:r2(Math.max(poupMes, auto)), temVenc:!!vm};
+  const ant = (S.paraCarteira || []).find(x => x.id === "mes");
+  const igual = ant && !ant.del && ["mes", "liquido", "gastosPrev", "poupanca", "temVenc"].every(k => ant[k] === novo[k]);
+  if (!igual) put("paraCarteira", novo);
+}
+/* as compras da Carteira contam como depósitos num objetivo de poupança (a partir da data escolhida) */
+function aplicarInvestimentos(){
+  const obj = S.cfg.invObj, desde = S.cfg.invDesde || "", ok = obj && live("poupObj").some(o => o.id === obj);
+  const ops = (S.carteira || []).filter(x => x.id && x.id.startsWith("op-") && !x.del && x.data >= desde);
+  const quer = new Map(ok ? ops.map(x => ["inv-" + x.id.slice(3), x]) : []);
+  let mud = false;
+  quer.forEach((x, id) => {
+    const ex = byId("poupMov", id), nota = `${x.valor >= 0 ? "Compra" : "Venda"} de ${x.sym} (Carteira)`;
+    if (!ex || ex.del || ex.obj !== obj || ex.data !== x.data || ex.valor !== x.valor || ex.nota !== nota){ put("poupMov", {id, obj, data:x.data, valor:r2(x.valor), nota, origem:"carteira"}); mud = true; }
+  });
+  S.poupMov.filter(x => !x.del && x.origem === "carteira" && !quer.has(x.id)).forEach(x => { remove("poupMov", x.id); mud = true; });
+  return mud;
+}
+function setInvObj(v){ setCfg({invObj:v, invDesde:S.cfg.invDesde || `${ym(today())}-01`}); aplicarInvestimentos(); save(); render(); }
+function setInvDesde(v){ setCfg({invDesde:v}); aplicarInvestimentos(); save(); render(); }
+function cartCasa(){
+  const r = cartResumo(); if (!r) return "";
+  const cor = v => v > 0 ? "var(--green)" : v < 0 ? "var(--red)" : "inherit", sg = v => v > 0 ? "+" : v < 0 ? "−" : "";
+  return `<a class="card" href="${esc(r.url || "https://ricardojsilva11-art.github.io/carteira/")}" style="text-decoration:none;flex-direction:row;flex-wrap:wrap;align-items:center;gap:18px">
+    <div><div class="small muted" style="font-weight:700">Investimentos</div><div class="mid">${eur(r.valor)}</div></div>
+    <div><div class="xs muted">Resultado</div><div class="small" style="color:${cor(r.ganho)};font-weight:700">${sg(r.ganho)}${eur(Math.abs(r.ganho))} (${sg(r.rend)}${Math.abs(r.rend * 100).toLocaleString("pt-PT", {maximumFractionDigits:1})} %)</div></div>
+    <div><div class="xs muted">Hoje</div><div class="small" style="color:${cor(r.dia)};font-weight:700">${sg(r.dia)}${eur(Math.abs(r.dia))}</div></div>
+    ${r.divMes ? `<div><div class="xs muted">Dividendos este mês</div><div class="small" style="font-weight:700">${eur(r.divMes)}</div></div>` : ""}
+    <span class="xs muted" style="margin-left:auto">App Carteira ›</span></a>`;
+}
+function cartPoup(){
+  const r = cartResumo(), objs = live("poupObj"), m = ym(today());
+  if (!r) return `<section class="card"><h2>Investimentos</h2><span class="small muted">Liga a app Carteira (Ajustes › Ligação à app dia.) para veres aqui os teus investimentos e contares as compras num objetivo.</span></section>`;
+  const inv = (S.carteira || []).filter(x => x.id.startsWith("op-") && !x.del && ym(x.data || "") === m).reduce((a, x) => a + (+x.valor || 0), 0);
+  return `<section class="card"><div class="card-head"><h2>Investimentos (app Carteira)</h2><a class="linkbtn" href="${esc(r.url || "https://ricardojsilva11-art.github.io/carteira/")}">Abrir</a></div>
+    <div class="mid">${eur(r.valor)}</div><span class="small muted">Investido este mês: ${eur(inv)}</span>
+    <label class="field">Contar as compras no objetivo<select onchange="setInvObj(this.value)"><option value="">Não contar</option>${objs.map(o => `<option value="${o.id}" ${S.cfg.invObj === o.id ? "selected" : ""}>${esc(o.nome)}</option>`).join("")}</select></label>
+    ${S.cfg.invObj ? `<label class="field">A partir de<input type="date" value="${esc(S.cfg.invDesde || "")}" onchange="setInvDesde(this.value)"></label><span class="xs muted">Cada compra entra como depósito e cada venda como levantamento nesse objetivo.</span>` : ""}
+  </section>`;
+}
+
 /* ---------- POUPANÇA ---------- */
 function vPoup(){
   const t = today(), m = ym(t), objs = live("poupObj"), autos = live("poupAuto");
@@ -2015,6 +2068,7 @@ function vPoup(){
   ${sugestoesHtml()}
   <div class="row">
     <div class="main-col">
+      ${cartPoup()}
       ${objs.length ? `<div class="grid g2">${objs.map(card).join("")}</div>` : `<section class="card"><h2>Ainda não tens objetivos</h2><span class="small muted">Cria o primeiro: férias, fundo de emergência, carro… Indica quanto queres juntar e até quando, e a app diz-te quanto pôr de lado por mês.</span><div><button class="btn" type="button" data-a="edit-obj">+ Criar objetivo</button></div></section>`}
       <section class="card">
         <h2>Últimos 12 meses</h2>
