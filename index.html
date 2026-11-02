@@ -23,7 +23,7 @@
 <style>
 :root{
   --bg:#F6F4EF; --card:#FFFFFF; --soft:#F1EFE9; --line:#E7E4DD;
-  --ink:#16161A; --muted:#5E5E66; --faint:#8A8A93;
+  --ink:#16161A; --muted:#55555D; --faint:#74747D;
   --accent:#D4F55B; --on-accent:#16161A;
   --inv:#16161A; --on-inv:#FFFFFF; --inv-muted:#BDBDC4; --inv-line:#2E2E36;
   --violet:#8A7CF0; --violet-soft:#E4DDFB; --violet-ink:#3B2E9E;
@@ -39,7 +39,7 @@
 @media (prefers-color-scheme:dark){
   :root:not([data-theme="light"]){
     --bg:#0E0E11; --card:#18181D; --soft:#212127; --line:#2B2B33;
-    --ink:#F3F3F5; --muted:#A3A3AD; --faint:#7A7A84;
+    --ink:#F3F3F5; --muted:#AEAEB8; --faint:#8E8E98;
     --inv:#26262E; --on-inv:#FFFFFF; --inv-muted:#B5B5BF; --inv-line:#36363F;
     --violet:#9C90F5; --violet-soft:#2C2650; --violet-ink:#CEC6FF;
     --coral:#FF9F7A; --coral-soft:#3A2119; --coral-ink:#FFB89D;
@@ -54,7 +54,7 @@
 :root[data-theme="dark"]{
   --s1:#3987e5; --s2:#d95926; --s3:#199e70; --s4:#c98500; --s5:#d55181; --s6:#008300; --s7:#9085e9; --s8:#e66767;
   --bg:#0E0E11; --card:#18181D; --soft:#212127; --line:#2B2B33;
-  --ink:#F3F3F5; --muted:#A3A3AD; --faint:#7A7A84;
+  --ink:#F3F3F5; --muted:#AEAEB8; --faint:#8E8E98;
   --inv:#26262E; --on-inv:#FFFFFF; --inv-muted:#B5B5BF; --inv-line:#36363F;
   --violet:#9C90F5; --violet-soft:#2C2650; --violet-ink:#CEC6FF;
   --coral:#FF9F7A; --coral-soft:#3A2119; --coral-ink:#FFB89D;
@@ -408,6 +408,42 @@ table.hist{font-size:13px} table.hist td{padding:6px 4px}
 .asrow .asord{grid-column:1 / -1}
 @media (max-width:640px){ .asrow{grid-template-columns:repeat(3,minmax(0,1fr))} .asrow .asname{grid-column:1 / -1} }
 
+/* ---------- v3.9 · legibilidade e uniformização ---------- */
+.small{font-size:14px} .xs{font-size:13px}
+.item .s{font-size:13px; line-height:1.35}
+.kpi .l, .credrow .l, .asrow .l, table.cmp th, th, .legend, .cal-head, .lgd{font-size:13px}
+.chip{font-size:12.5px}
+.set{font-size:12px}
+.day .n{font-size:13px}
+.chart .col span, .lchart text, .lchart .xl, .tl-axis{font-size:12px}
+.eyebrow{font-size:12.5px}
+.card{gap:14px}
+.card-head h2, .card > h2, details.fold > summary h2{font-size:18px; letter-spacing:-.01em}
+/* secções dobráveis */
+details.fold > summary{list-style:none; cursor:pointer; display:flex; align-items:center; justify-content:space-between; gap:10px; min-height:28px}
+details.fold > summary::-webkit-details-marker{display:none}
+details.fold > summary::after{content:""; width:9px; height:9px; border-right:2px solid var(--muted); border-bottom:2px solid var(--muted); transform:rotate(45deg); margin:0 6px 4px auto; transition:transform .2s; flex-shrink:0}
+details.fold[open] > summary::after{transform:rotate(-135deg); margin-bottom:-4px}
+details.fold > summary h2{margin:0}
+details.fold > summary .card-head{flex:1}
+details.fold:not([open]){gap:0}
+.sheet-opts a{display:flex; flex-direction:column; align-items:center; justify-content:center; gap:8px; padding:18px 10px; border-radius:18px; background:var(--soft); color:var(--ink); text-decoration:none; font-weight:700; font-size:15px}
+.sheet-opts a[aria-current="page"]{outline:2px solid var(--accent)}
+@media (max-width:760px){
+  body{font-size:15.5px}
+  .bottomnav{grid-template-columns:repeat(6,minmax(0,1fr)); height:70px; border-radius:26px; padding:0 4px; left:10px; right:10px}
+  .bottomnav a, .bottomnav button{justify-self:stretch; width:auto; height:58px; margin:0 2px; border:0; background:transparent; border-radius:18px; color:#C4C4CC; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:3px; font:inherit; padding:0; text-decoration:none}
+  .bottomnav span{font-size:11px; font-weight:700; line-height:1; white-space:nowrap; position:relative}
+  .bottomnav [aria-current="page"]{background:var(--accent); color:#16161A}
+  .bottomnav .nb{position:absolute; top:-30px; right:-12px; min-width:16px; height:16px; padding:0 4px; border-radius:8px; background:var(--accent); color:#16161A; font-style:normal; font-size:10px; font-weight:800; display:flex; align-items:center; justify-content:center}
+  .bottomnav [aria-current="page"] .nb{background:#16161A; color:var(--accent)}
+  .fab{bottom:calc(98px + env(safe-area-inset-bottom)); width:56px; height:56px}
+  .toast{bottom:calc(96px + env(safe-area-inset-bottom))}
+  .app{padding-bottom:calc(120px + env(safe-area-inset-bottom))}
+  .kpis{gap:10px}
+  .card-head h2, .card > h2, details.fold > summary h2{font-size:17px}
+}
+
 </style>
 </head>
 <body>
@@ -435,7 +471,7 @@ table.hist{font-size:13px} table.hist td{padding:6px 4px}
 /* ============================================================
    dia. — núcleo: dados, datas, sincronização, horário
    ============================================================ */
-const APP_VERSION = "3.8 · 02/11/2026";
+const APP_VERSION = "3.9 · 02/11/2026";
 const KEY = "dia-app-v1";
 const VENC_KEY = "vencimento-app-v1";
 const COLS = ["tarefas","eventos","gastos","fixos","refeicoes","agua","treinos","sessoes","inbox","turnos","saude","poupObj","poupMov","poupAuto","recorr","extras","creditos","credMov","prazos","assinaturas","receitas"];
@@ -1290,6 +1326,8 @@ const IC = {
   download:'<path d="M12 4v11M7 10l5 5 5-5"/><path d="M4 17v2a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-2"/>',
   repeat:'<path d="M4 11V9a3 3 0 0 1 3-3h12M16 3l3 3-3 3"/><path d="M20 13v2a3 3 0 0 1-3 3H5M8 21l-3-3 3-3"/>',
   creditos:'<path d="M3 10l9-6 9 6"/><path d="M5 10v8M9.5 10v8M14.5 10v8M19 10v8M3 20h18"/>',
+  mais:'<circle cx="5" cy="12" r="1.6"/><circle cx="12" cy="12" r="1.6"/><circle cx="19" cy="12" r="1.6"/>',
+  definicoes:'<circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/>',
   cal:'<rect x="3" y="4" width="18" height="17" rx="2"/><path d="M3 9h18M8 2v4M16 2v4M8 14h3"/>'
 };
 const ic = (n, s = 20, sw = 2) => `<svg width="${s}" height="${s}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="${sw}" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${IC[n]}</svg>`;
@@ -1302,7 +1340,10 @@ function pendingTasks(){ const t = today(); return live("tarefas").filter(x => !
 function renderNav(){
   const r = route(), n = pendingTasks().length;
   $("#pills").innerHTML = ROUTES.map(([k, l]) => `<a href="#${k}" ${r === k ? 'aria-current="page"' : ""}>${l}${k === "tarefas" && n ? `<span class="count">${n}</span>` : ""}</a>`).join("");
-  $("#bottomnav").innerHTML = ROUTES.map(([k, l]) => `<a href="#${k}" aria-label="${l}" ${r === k ? 'aria-current="page"' : ""}>${ic(k, 22)}</a>`).join("");
+  /* iPhone: 5 separadores principais com nome; os outros ficam em «Mais» */
+  const MAIN = ["hoje","tarefas","horario","treino","gastos"], noMais = !MAIN.includes(r);
+  $("#bottomnav").innerHTML = ROUTES.filter(([k]) => MAIN.includes(k)).map(([k, l]) => `<a href="#${k}" ${r === k ? 'aria-current="page"' : ""}>${ic(k, 22)}<span>${l}${k === "tarefas" && n ? `<i class="nb">${n > 9 ? "9+" : n}</i>` : ""}</span></a>`).join("")
+    + `<button type="button" data-a="mais" ${noMais ? 'aria-current="page"' : ""} aria-label="Mais: Poupança, Créditos e Definições">${ic("mais", 22)}<span>Mais</span></button>`;
   const nm = (S.cfg.nome || "").trim();
   $("#avatar").textContent = nm ? nm[0].toUpperCase() : "?";
   $("#avatar").setAttribute("aria-current", r === "definicoes" ? "page" : "false");
@@ -1498,7 +1539,7 @@ function vHoje(){
   return `
   <section class="hero">
     <div class="hero-text">
-      <p class="small muted" style="margin:0;font-weight:600">${longDate(k)}${isT ? "" : " · " + relDate(k)}</p>
+      <p class="small muted hide-m" style="margin:0;font-weight:600">${longDate(k)}${isT ? "" : " · " + relDate(k)}</p>
       <h1>${isT ? `${hi}${nome ? ", " + esc(nome) : ""}.` : `${relDate(k)}.`} <span>${esc(heroSentence(k)) || (isT ? "Nada marcado para hoje." : "Nada marcado para este dia.")}</span></h1>
     </div>
     <div class="now">${nowHtml}</div>
@@ -1888,7 +1929,7 @@ function vGastos(){
       <button class="iconbtn" type="button" data-a="gm" data-v="-1" aria-label="Mês anterior">${ic("left")}</button>
       <b style="min-width:140px;text-align:center">${MESES[Mo - 1][0].toUpperCase() + MESES[Mo - 1].slice(1)} ${Y}</b>
       <button class="iconbtn" type="button" data-a="gm" data-v="1" aria-label="Mês seguinte">${ic("right")}</button>
-      <button class="btn ghost" type="button" data-a="add-receita">+ Receita</button>
+      <button class="btn ghost hide-m" type="button" data-a="add-receita">+ Receita</button>
       <button class="btn" type="button" data-a="add-gasto">+ Gasto</button></div></div>
   ${(() => { const d = disponivelMes(cur ? t : `${m}-${pad(nd)}`);
     if (!d) return `<section class="card" style="flex-direction:row;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:12px"><div><h2>Quanto tens para gastar</h2><span class="small muted">Liga a app Vencimentos para a app saber o teu vencimento líquido e mostrar quanto te resta até ao fim do mês.</span></div><button class="btn" type="button" data-a="venc-import">Ligar a app Vencimentos</button></section>`;
@@ -1907,7 +1948,6 @@ function vGastos(){
     <div class="kpi inv"><div class="l">Gasto no mês</div><div class="v">${eur(tot)}</div><div class="xs">${orc ? `de ${eur0(orc)} de orçamento` : "sem orçamento definido"}</div></div>
     <div class="kpi"><div class="l">Orçamento disponível</div><div class="v" style="color:${disp < 0 ? "var(--red)" : "var(--green)"}">${eur(disp)}</div><div class="xs muted">${cur && left > 0 && disp > 0 ? `≈ ${eur(disp / left)} por dia` : ""}</div></div>
     <div class="kpi"><div class="l">Vs. mês anterior</div><div class="v">${prevSame ? (tot >= prevSame ? "+" : "−") + Math.abs(Math.round((tot - prevSame) / prevSame * 100)) + " %" : "—"}</div><div class="xs muted">até ao dia ${day}</div></div>
-    <div class="kpi"><div class="l">Movimentos</div><div class="v">${arr.length}</div><div class="xs muted">${arr.filter(g => g.origem && g.origem !== "manual").length} automáticos</div></div>
   </div>
   <div class="row">
     <div class="main-col">
@@ -1982,11 +2022,11 @@ function vDef(){
     </section>
 
     ${notifCard()}
-    <section class="card">
-      <h2>Horas dos turnos</h2>
+    <details class="card fold" data-fold="horas" ${UI.fold && UI.fold["horas"] ? "open" : ""}>
+      <summary><h2>Horas dos turnos</h2></summary>
       <div class="fields">${["M","T","N"].map(s => `<label class="field">Início ${s}<input type="time" data-c="hora" data-s="${s}" data-i="0" value="${esc(c.horas[s][0])}"></label><label class="field">Fim ${s}<input type="time" data-c="hora" data-s="${s}" data-i="1" value="${esc(c.horas[s][1])}"></label>`).join("")}</div>
       <label class="field">Hora habitual do treino<input type="time" data-c="cfg" data-k="treinoHora" value="${esc(c.treinoHora)}"></label>
-    </section>
+    </details>
 
     <section class="card">
       <div class="card-head"><h2>Orçamento mensal</h2><b class="mid">${eur0(orcTotal())}</b></div>
@@ -1994,20 +2034,16 @@ function vDef(){
       <div><button class="btn sm" type="button" data-a="orc">Editar orçamento</button></div>
     </section>
 
-    <section class="card">
-      <h2>Objetivos de alimentação</h2>
-      <div class="fields">${[["kcal","Calorias (kcal)"],["p","Proteína (g)"],["h","Hidratos (g)"],["g","Gordura (g)"],["agua","Água (L)"]].map(([k, l]) => `<label class="field">${l}<input inputmode="decimal" data-c="meta" data-k="${k}" value="${esc(num(c.metas[k], 2))}"></label>`).join("")}</div>
-    </section>
 
-    <section class="card">
-      <h2>Entrada automática (Atalhos do iPhone)</h2>
+    <details class="card fold" data-fold="atalhos" ${UI.fold && UI.fold["atalhos"] ? "open" : ""}>
+      <summary><h2>Entrada automática (Atalhos do iPhone)</h2></summary>
       ${syncOn() ? `<span class="small muted">Na app Atalhos cria uma automação «Transação» (Apple Pay) com a ação «Obter conteúdo do URL»: método POST, corpo JSON, para este endereço:</span>
         <code>${esc(base)}/api/in</code>
         <pre>{"code":"${esc(sy.code)}","tipo":"gasto","valor":&lt;Montante&gt;,"desc":"&lt;Comerciante&gt;","origem":"applepay"}</pre>
         <span class="small muted">Para o Apple Saúde, uma automação diária às 23:30 com:</span>
         <pre>{"code":"${esc(sy.code)}","tipo":"saude","passos":&lt;Passos&gt;,"sono":&lt;Horas de sono&gt;,"peso":&lt;Peso&gt;}</pre>
         <span class="xs muted">O que entra assim aparece em «Entrou sozinho» no ecrã Hoje para confirmares.</span>` : `<span class="small muted">Liga primeiro a sincronização. Depois aparece aqui o endereço para os Atalhos do iPhone enviarem pagamentos Apple Pay e dados do Apple Saúde.</span>`}
-    </section>
+    </details>
 
     <section class="card">
       <div class="card-head"><h2>Voz</h2><span class="chip ${UI.ping && UI.ping.ia ? "c-ok" : "c-x"}">${UI.ping ? (UI.ping.ia ? "IA ligada" : "IA desligada") : "—"}</span></div>
@@ -2016,8 +2052,8 @@ function vDef(){
       <span class="xs muted">${UI.ping ? `Servidor: IA ${UI.ping.ia ? "ligada (entende pedidos livres)" : "desligada (só comandos simples)"} · gravação de voz ${UI.ping.voz ? "ligada" : "desligada (liga «Workers AI» no servidor se o reconhecimento do navegador não funcionar)"}.` : (syncOn() ? "A verificar o servidor…" : "Sem servidor: só comandos simples, com o reconhecimento de voz do navegador.")}</span>
     </section>
 
-    <section class="card">
-      <div class="card-head"><h2>Gmail e Google Calendário</h2><span class="chip ${S.gstatus && S.gstatus.cal ? "c-ok" : "c-x"}">${S.gstatus && S.gstatus.cal ? "Ligado" : "Por ligar"}</span></div>
+    <details class="card fold" data-fold="google" ${UI.fold && UI.fold["google"] ? "open" : ""}>
+      <summary><div class="card-head"><h2>Gmail e Google Calendário</h2><span class="chip ${S.gstatus && S.gstatus.cal ? "c-ok" : "c-x"}">${S.gstatus && S.gstatus.cal ? "Ligado" : "Por ligar"}</span></div></summary>
       ${S.gstatus && (S.gstatus.cal || S.gstatus.gmail) ? `<span class="small muted">Calendário lido ${S.gstatus.cal ? new Date(S.gstatus.cal).toLocaleString("pt-PT") : "—"} (${S.gstatus.calN || 0} compromissos) · turnos escritos ${S.gstatus.calW ? new Date(S.gstatus.calW).toLocaleString("pt-PT") : "—"} · Gmail: ${S.gstatus.gmailN || 0} emails lidos${S.gstatus.gmail ? ", o último " + new Date(S.gstatus.gmail).toLocaleString("pt-PT") : ""}.</span>` : ""}
       <span class="small muted">Um pequeno script na tua conta Google faz a ligação de 15 em 15 minutos: traz os compromissos do teu calendário, põe os turnos e treinos num calendário «dia.» e envia para a IA os emails com faturas, avisos ou escalas (ou com a etiqueta «dia»).</span>
       ${syncOn() ? `<ol class="small" style="margin:0;padding-left:20px;display:flex;flex-direction:column;gap:4px">
@@ -2027,15 +2063,15 @@ function vDef(){
         <li>Em cima escolhe a função <b>instalar</b> e carrega em <b>Executar</b>. Autoriza com a tua conta Google.</li>
       </ol>
       <div style="display:flex;gap:8px;flex-wrap:wrap"><button class="btn sm" type="button" data-a="gscript">${ic("google", 16)} Copiar script</button></div>` : `<span class="small" style="font-weight:700">Liga primeiro a sincronização acima.</span>`}
-    </section>
+    </details>
 
     ${copiasCard()}
-    <section class="card">
-      <h2>Cópia de segurança em ficheiro</h2>
+    <details class="card fold" data-fold="ficheiro" ${UI.fold && UI.fold["ficheiro"] ? "open" : ""}>
+      <summary><h2>Cópia de segurança em ficheiro</h2></summary>
       <span class="small muted">Guarda tudo num ficheiro ou repõe a partir de um ficheiro.</span>
       <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center"><span class="small">Versão da app: <b>${APP_VERSION}</b></span><button class="btn sm ghost" type="button" data-a="atualizar">Procurar atualização</button></div>
       <div style="display:flex;gap:8px;flex-wrap:wrap"><button class="btn sm" type="button" data-a="export">Exportar cópia</button><button class="btn sm ghost" type="button" data-a="import">Importar cópia</button><button class="btn sm danger" type="button" data-a="wipe">Apagar dados deste aparelho</button></div>
-    </section>
+    </details>
   </div>`;
 }
 
@@ -2387,6 +2423,7 @@ function dlgSheet(){
     <button type="button" data-a="sheet" data-v="voz" style="grid-column:1/-1;background:var(--accent);color:var(--on-accent)">${ic("mic", 22)}Falar</button>
     <button type="button" data-a="sheet" data-v="gasto">${ic("gastos", 22)}Gasto</button>
     <button type="button" data-a="sheet" data-v="tarefa">${ic("tarefas", 22)}Tarefa</button>
+    <button type="button" data-a="sheet" data-v="receita">${ic("poupanca", 22)}Receita</button>
     <button type="button" data-a="sheet" data-v="evento">${ic("cal", 22)}Compromisso</button>
     <button type="button" data-a="sheet" data-v="foto">${ic("cam", 22)}Fotografar documento</button>
     <button type="button" data-a="sheet" data-v="ficheiro">${ic("file", 22)}Escolher ficheiro</button></div>
@@ -2441,7 +2478,7 @@ function dlgAuto(a = {}){
 }
 
 /* ---------- IA ---------- */
-const secOf = r => ({tarefas:"tarefas", horario:"horario", treino:"treino", comida:"comida", gastos:"gastos"})[r] || "auto";
+const secOf = r => ({tarefas:"tarefas", horario:"horario", treino:"treino", gastos:"gastos"})[r] || "auto";
 const b64 = buf => { let s = "", b = new Uint8Array(buf); for (let i = 0; i < b.length; i += 0x8000) s += String.fromCharCode.apply(null, b.subarray(i, i + 0x8000)); return btoa(s); };
 function loadScript(src){ return new Promise((ok, ko) => { const s = document.createElement("script"); s.src = src; s.onload = ok; s.onerror = () => ko(new Error("Não consegui carregar o leitor de Excel.")); document.head.appendChild(s); }); }
 async function prepFile(f){
@@ -2477,7 +2514,8 @@ async function aiFiles(files, sec){
     try{
       const ficheiro = await prepFile(f);
       const j = await api("/api/ia", {secao:sec, ficheiro, ctx:{hoje:today(), nome:S.cfg.nome || "", categorias:cats(), tiposRefeicao:REF_TIPOS, horas:S.cfg.horas}});
-      let itens = (j.itens || []).filter(it => it && it.tipo);
+      /* a Comida saiu da app: refeições lidas nos documentos ficam de fora */
+      let itens = (j.itens || []).filter(it => it && it.tipo && it.tipo !== "refeicao");
       let resumo = j.resumo || "";
       const turnos = itens.filter(i => i.tipo === "turno");
       if (turnos.length){
@@ -2518,6 +2556,9 @@ const A = {
   "del": el => { const c = el.dataset.col; remove(c, el.dataset.id); save(); render(); toast("Apagado."); },
   "tf": el => { UI.tarefasFiltro = el.dataset.v; render(); },
   "hdia": el => setDia(el.dataset.k),
+  "mais": () => openDlg("Mais", `<div class="sheet-opts">${[["poupanca","Poupança"],["creditos","Créditos"],["definicoes","Definições"]].map(([k, l]) => `<a href="#${k}" data-a="ir" data-k="${k}" ${route() === k ? 'aria-current="page"' : ""}>${ic(k, 22)}${l}</a>`).join("")}
+      <button type="button" data-a="sheet" data-v="voz">${ic("mic", 22)}Falar</button></div>`, null, "", "", "Fechar"),
+  "ir": el => { $("#dlg").close("cancel"); location.hash = "#" + el.dataset.k; },
   "excel": () => exportarExcel(),
   "resumo": el => dlgResumo(el.dataset.k),
   "notif-on": () => ativarNotif(), "notif-off": () => desativarNotif(), "notif-test": () => testarNotif(),
@@ -2610,7 +2651,7 @@ const A = {
     }catch(e){ toast(e.message || "Ficheiro inválido."); } }),
   "wipe": () => openDlg("Apagar dados deste aparelho?", '<span class="small">Apaga tudo o que está guardado neste aparelho. Se tiveres sincronização, os dados continuam no servidor e voltam quando ligares de novo o código.</span>', () => { try{ localStorage.removeItem(KEY); }catch(e){} S = defaultState(); render(); toast("Dados apagados."); }, "Apagar"),
   "sheet": el => { $("#dlg").close("cancel"); const v = el.dataset.v; setTimeout(() => {
-    if (v === "voz") abrirVoz(); else if (v === "gasto") dlgGasto(); else if (v === "tarefa") dlgTarefa(); else if (v === "refeicao") dlgRefeicao(); else if (v === "evento") dlgEvento();
+    if (v === "voz") abrirVoz(); else if (v === "gasto") dlgGasto(); else if (v === "tarefa") dlgTarefa(); else if (v === "refeicao") dlgRefeicao(); else if (v === "evento") dlgEvento(); else if (v === "receita") dlgReceita();
     else pickFile("image/*,application/pdf,.pdf,.csv,.xlsx,.xls", f => aiFiles([f], secOf(route())), v === "foto"); }, 50); }
 };
 function pickFile(accept, cb, camera){
@@ -2683,6 +2724,9 @@ document.addEventListener("input", e => {
   if (el.name === "hora" && f.tipo && !f.dataset.tipoMan) f.tipo.value = guessRefTipo(el.value);
 });
 document.addEventListener("focusout", () => setTimeout(() => { if (pendingRender) softRender(); }, 60));
+
+/* secções dobráveis (Definições): lembra o que está aberto */
+document.addEventListener("toggle", e => { const d = e.target; if (d.dataset && d.dataset.fold){ UI.fold = UI.fold || {}; UI.fold[d.dataset.fold] = d.open; } }, true);
 
 /* ---------- arrastar documentos ---------- */
 let dragN = 0;
