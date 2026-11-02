@@ -385,6 +385,7 @@ pre{white-space:pre-wrap; overflow-wrap:anywhere; background:var(--soft); paddin
 .lchart .xl{font-size:11px; fill:var(--muted)}
 @media (max-width:420px){ .credrow{gap:6px} .credrow .v{font-size:15px} }
 a.linkbtn{text-decoration:none}
+.dlg-err{background:var(--red-soft); color:var(--red); border-radius:12px; padding:10px 12px; font-size:14px; font-weight:700}
 
 </style>
 </head>
@@ -413,7 +414,7 @@ a.linkbtn{text-decoration:none}
 /* ============================================================
    dia. — núcleo: dados, datas, sincronização, horário
    ============================================================ */
-const APP_VERSION = "3.5 · 01/11/2026";
+const APP_VERSION = "3.6 · 02/11/2026";
 const KEY = "dia-app-v1";
 const VENC_KEY = "vencimento-app-v1";
 const COLS = ["tarefas","eventos","gastos","fixos","refeicoes","agua","treinos","sessoes","inbox","turnos","saude","poupObj","poupMov","poupAuto","recorr","extras","creditos","credMov","prazos","assinaturas"];
@@ -473,6 +474,8 @@ function load(){
     const raw = localStorage.getItem(KEY);
     if (!raw) return defaultState();
     const s = JSON.parse(raw), d = defaultState();
+    /* migração segura: as definições antigas passam a ter hora por chave (a hora do último bloco) */
+    if (s.cfg && !s.cfg._u){ s.cfg._u = {}; Object.keys(s.cfg).forEach(k => { if (k !== "upd") s.cfg._u[k] = s.cfg.upd || 0; }); }
     s.cfg = Object.assign(d.cfg, s.cfg || {});
     s.cfg.horas = Object.assign(d.cfg.horas, s.cfg.horas || {});
     s.cfg.metas = Object.assign(d.cfg.metas, s.cfg.metas || {});
@@ -499,13 +502,26 @@ function put(c, item){
   return item;
 }
 function remove(c, id){ const it = byId(c, id); if (it){ Object.keys(it).forEach(k => { if (!["id","upd"].includes(k)) delete it[k]; }); it.del = true; it.upd = Date.now(); } }
-function setCfg(patch){ Object.assign(S.cfg, patch); S.cfg.upd = Date.now(); }
+/* cada definição tem a sua hora de alteração: mudar o orçamento no PC e um aviso no iPhone já não se apagam um ao outro */
+function setCfg(patch){ const now = Date.now(); S.cfg._u = Object.assign({}, S.cfg._u || {}); Object.keys(patch).forEach(k => S.cfg._u[k] = now); Object.assign(S.cfg, patch); S.cfg.upd = now; }
+function mergeCfg(a, b){
+  a = a || {}; b = b || {};
+  const ua = a._u || {}, ub = b._u || {}, out = {}, u = {};
+  const keys = new Set(Object.keys(a).concat(Object.keys(b)).filter(k => k !== "_u" && k !== "upd"));
+  keys.forEach(k => {
+    /* sem hora própria: no formato antigo (sem _u) vale a hora do bloco; no novo, a chave nunca foi mudada (0) */
+    const ta = k in a ? (ua[k] ?? (a._u ? 0 : (a.upd || 0))) : -1, tb = k in b ? (ub[k] ?? (b._u ? 0 : (b.upd || 0))) : -1;
+    out[k] = tb > ta ? b[k] : (k in a ? a[k] : b[k]); u[k] = Math.max(ta, tb);
+  });
+  out._u = u; out.upd = Math.max(a.upd || 0, b.upd || 0);
+  return out;
+}
 
 /* junta dois estados: em cada registo fica a versão mais recente */
 function mergeState(a, b){
   if (!b) return a;
   const out = Object.assign({}, a);
-  out.cfg = (b.cfg && (b.cfg.upd || 0) > (a.cfg.upd || 0)) ? Object.assign({}, a.cfg, b.cfg) : a.cfg;
+  out.cfg = b.cfg ? mergeCfg(a.cfg, b.cfg) : a.cfg;
   ["venc","agendaOut","gstatus","analise"].forEach(k => { out[k] = (b[k] && (!a[k] || (b[k].upd || 0) > (a[k].upd || 0))) ? b[k] : (a[k] || null); });
   const cols = new Set(COLS);
   Object.keys(a).concat(Object.keys(b)).forEach(k => { if (k !== "local" && (Array.isArray(a[k]) || Array.isArray(b[k]))) cols.add(k); });
@@ -731,7 +747,48 @@ const CAT_HINTS = [
 ];
 function guessCat(desc){ const c = cats(); for (const [k, re] of CAT_HINTS) if (re.test(desc || "") && c.includes(k)) return k; return c.includes("Outros") ? "Outros" : c[c.length - 1]; }
 /* gasto igual já registado (mesma data e valor) */
-const gastoExiste = it => live("gastos").some(g => g.data === it.data && Math.abs((+g.valor || 0) - pnum(it.valor)) < .01);
+/* gasto parecido já registado: mesmo valor no mesmo dia, ou mesmo valor e mesmo comerciante até 2 dias de diferença */
+function gastoParecido(it, ignorar){
+  const v = Math.abs(pnum(it.valor)), d = it.data || today(), nd = normDesc(it.desc);
+  if (!v) return null;
+  return live("gastos").find(g => {
+    if (g.id === ignorar || Math.abs((+g.valor || 0) - v) >= .01) return false;
+    if (g.data === d) return true;
+    const dias = Math.abs((pdk(g.data) - pdk(d)) / 864e5), ng = normDesc(g.desc);
+    return dias <= 2 && nd && ng && (ng === nd || ng.includes(nd) || nd.includes(ng));
+  }) || null;
+}
+const gastoExiste = it => !!gastoParecido(it);
+const dupTxt = g => `${eur(g.valor)} · ${g.desc || g.cat || "gasto"} · ${relDate(g.data).toLowerCase()}`;
+/* validação dos formulários */
+function vNum(v, nome, o = {}){
+  const min = o.min ?? .01, max = o.max ?? 1e7, s = String(v == null ? "" : v).trim();
+  if (!s){ if (o.opc) return 0; throw new Error(`Indica ${nome}.`); }
+  const n = pnum(s);
+  if (!/\d/.test(s) || !isFinite(n)) throw new Error(`${nome[0].toUpperCase() + nome.slice(1)} não é um número válido.`);
+  if (n < min) throw new Error(min > 0 ? `${nome[0].toUpperCase() + nome.slice(1)} tem de ser maior que zero.` : `${nome[0].toUpperCase() + nome.slice(1)} não pode ser negativo.`);
+  if (n > max) throw new Error(`${nome[0].toUpperCase() + nome.slice(1)} parece demasiado alto (máximo ${num(max, 2)}).`);
+  return n;
+}
+function vData(k, nome = "a data", opc){
+  if (!k){ if (opc) return ""; throw new Error(`Indica ${nome}.`); }
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(k) || isNaN(pdk(k)) || k < "2000-01-01" || k > "2100-12-31") throw new Error(`${nome[0].toUpperCase() + nome.slice(1)} não é válida.`);
+  return k;
+}
+/* antes de mudar de versão, guarda uma cópia dos dados deste aparelho */
+function copiaVersao(){
+  try{
+    const ant = localStorage.getItem("dia-versao");
+    if (ant === APP_VERSION) return;
+    const raw = localStorage.getItem(KEY);
+    if (raw){
+      const arr = JSON.parse(localStorage.getItem("dia-copias-versao") || "[]");
+      arr.unshift({data:today(), versao:ant || "anterior", v:raw});
+      localStorage.setItem("dia-copias-versao", JSON.stringify(arr.slice(0, 3)));
+    }
+    localStorage.setItem("dia-versao", APP_VERSION);
+  }catch(e){}
+}
 /* nome do comerciante para agrupar */
 const normDesc = d => String(d || "").toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/\d+/g, "").replace(/[^a-z ]/g, " ").replace(/\s+/g, " ").trim().split(" ").slice(0, 2).join(" ");
 /* pagamentos que se repetem todos os meses (prováveis subscrições) */
@@ -1261,7 +1318,7 @@ function aiCard(sec, sub, tipos){
       <div class="card-head"><b class="small">${esc(f.nome)}</b><span class="chip c-ok">Lido</span></div>
       ${f.resumo ? `<span class="small muted">${esc(f.resumo)}</span>` : ""}
       <div class="list">${f.itens.map((it, ii) => `<div class="item"><div class="grow"><div class="t">${esc(itemTitle(it))}</div><div class="s">${esc(itemSub(it))}</div></div>
-        ${it._ok ? '<span class="chip c-ok">Adicionado</span>' : it._dup ? '<span class="chip c-x">Já existe</span>' : `<button class="btn sm" type="button" data-a="ai-add" data-sec="${sec}" data-i="${fi}" data-j="${ii}">Adicionar</button>`}</div>`).join("") || '<div class="empty">Não encontrei nada para registar neste documento.</div>'}</div>
+        ${it._ok ? '<span class="chip c-ok">Adicionado</span>' : it._dup ? `<span class="chip c-media" title="${esc(it._dupTxt || "")}">Parece repetido</span><button class="linkbtn" type="button" data-a="ai-add" data-sec="${sec}" data-i="${fi}" data-j="${ii}">Adicionar na mesma</button>` : `<button class="btn sm" type="button" data-a="ai-add" data-sec="${sec}" data-i="${fi}" data-j="${ii}">Adicionar</button>`}</div>`).join("") || '<div class="empty">Não encontrei nada para registar neste documento.</div>'}</div>
       <div class="dlg-actions">${f.extrato && !pend ? `<button class="btn sm acc" type="button" data-a="analisar">Analisar os meus gastos</button>` : ""}${pend > 1 ? `<button class="btn sm" type="button" data-a="ai-addall" data-sec="${sec}" data-i="${fi}">Adicionar ${f.extrato ? "os " + pend + " gastos" : "tudo (" + pend + ")"}</button>` : ""}<button class="btn sm ghost" type="button" data-a="ai-clear" data-sec="${sec}" data-i="${fi}">Fechar</button></div>
     </div>`;
   }).join("");
@@ -1430,7 +1487,7 @@ function vHoje(){
     <button class="btn" type="button" data-a="resumo" data-k="${pdk(t).getDay() === 1 ? addDays(t, -1) : t}" style="background:#16161A;color:#fff">Ver resumo</button></section>`; })() : ""}
   ${isT && inbox.length ? `<section class="inbox-row" aria-label="Entrou sozinho">
     <b class="small">Entrou sozinho</b>
-    ${inbox.slice(0, 6).map(x => `<span class="pill">${esc(itemTitle(x.dados || {}))} <span class="xs muted">${esc(x.origem || "")}</span>
+    ${inbox.slice(0, 6).map(x => `<span class="pill">${esc(itemTitle(x.dados || {}))} <span class="xs muted">${esc(x.origem || "")}</span>${x.dados && x.dados.tipo === "gasto" && gastoParecido(x.dados) ? `<span class="chip c-media" title="${esc(dupTxt(gastoParecido(x.dados)))}">Parece repetido</span>` : ""}
       <button class="btn" type="button" data-a="inbox-ok" data-id="${x.id}">Confirmar</button><button class="x" type="button" data-a="inbox-no" data-id="${x.id}" aria-label="Rejeitar">${ic("x", 16)}</button></span>`).join("")}
   </section>` : ""}
 
@@ -1594,7 +1651,7 @@ function ajustesCard(m){
   let efeito = "";
   if (v){
     const linhas = [m, mn].map(x => { const a = pagamentoMes(`${x}-01`), b = pagamentoMes(`${x}-01`, true); return a && b ? {x, liq:a.liquido, dif:r2(a.liquido - b.liquido)} : null; }).filter(Boolean);
-    efeito = linhas.map(l => `<div class="item"><div class="grow"><div class="t">Líquido previsto de ${nomeM(l.x)}</div><div class="s">${l.dif ? `${l.dif > 0 ? "+" : "−"}${eur(Math.abs(l.dif))} com as alterações` : "sem efeito das alterações"}</div></div><b class="small" style="${l.dif > 0 ? "color:var(--green)" : l.dif < 0 ? "color:var(--red)" : ""}">${eur(l.liq)}</b></div>`).join("");
+    efeito = linhas.map(l => `<div class="item"><div class="grow"><div class="t">Vencimento de ${nomeM(l.x)}${S.cfg.vencFimMes === false ? "" : ` <span class="muted" style="font-weight:600">· para gastar em ${nomeM(ym(addDays(l.x + "-01", 32)))}</span>`}</div><div class="s">${l.dif ? `${l.dif > 0 ? "+" : "−"}${eur(Math.abs(l.dif))} com as alterações` : "sem efeito das alterações"}</div></div><b class="small" style="${l.dif > 0 ? "color:var(--green)" : l.dif < 0 ? "color:var(--red)" : ""}">${eur(l.liq)}</b></div>`).join("");
   }
   const hTot = ex.reduce((a, x) => a + (+x.horas || 0), 0), vTot = ex.reduce((a, x) => a + valorExtra(x), 0);
   return `<section class="card" aria-label="Trocas e horas extra">
@@ -1888,7 +1945,7 @@ function vDef(){
 
     <section class="card">
       <div class="card-head"><h2>App Vencimentos</h2><span class="chip ${v ? "c-ok" : "c-x"}">${v ? "Ligada" : "Sem ligação"}</span></div>
-      ${(() => { const vm = vencMes(); return vm ? `<div class="small">Vencimento líquido de ${MESES[new Date().getMonth()]}: <b>${eur(vm.liquido)}</b> <span class="muted">(bruto ${eur(vm.bruto)} · IRS ${eur(vm.irs)} · SS ${eur(vm.ss)})</span></div>` : (v && !v.full ? `<div class="small" style="color:var(--amber-ink);font-weight:700">Importa outra vez a cópia da app Vencimentos para a app passar a saber o teu vencimento líquido.</div>` : ""); })()}
+      ${(() => { const vm = vencMes(), nm = MESES[new Date().getMonth()], pm = MESES[(new Date().getMonth() + 1) % 12]; return vm ? `<div class="small">Vencimento líquido de ${nm}: <b>${eur(vm.liquido)}</b>${c.vencFimMes !== false ? ` <span class="muted">· recebido no fim de ${nm}, para gastar em ${pm}</span>` : ""} <span class="muted">(bruto ${eur(vm.bruto)} · IRS ${eur(vm.irs)} · SS ${eur(vm.ss)})</span></div>` : (v && !v.full ? `<div class="small" style="color:var(--amber-ink);font-weight:700">Importa outra vez a cópia da app Vencimentos para a app passar a saber o teu vencimento líquido.</div>` : ""); })()}
       <span class="small muted">${v ? `Horário vindo de: ${esc(v.fonte)} · atualizado ${new Date(v.upd).toLocaleString("pt-PT")}. ${v.rot.padrao ? `Rotação ${esc(v.rot.padrao)} desde ${esc(v.rot.inicio)}.` : ""}` : "Se esta app estiver no mesmo endereço da app Vencimentos (ex.: ricardojsilva11-art.github.io), o horário é lido sozinho sempre que abres a app. Noutro endereço, importa a cópia de segurança da app Vencimentos."}</span>
       <div style="display:flex;gap:8px;flex-wrap:wrap"><button class="btn sm" type="button" data-a="venc-import">Importar cópia da app Vencimentos</button>${v ? '<button class="btn sm ghost" type="button" data-a="venc-off">Desligar</button>' : ""}</div>
       ${v && v.full ? `<label class="item" style="border:0;min-height:40px"><input class="check" type="checkbox" data-c="cfg-bool-r" data-k="vencFimMes" ${c.vencFimMes !== false ? "checked" : ""}> <span class="small" style="font-weight:700">Recebo no fim do mês: o vencimento conta para as despesas do mês seguinte</span></label>
@@ -1980,6 +2037,8 @@ function copiasCard(){
     ${UI.copias && UI.copias.erro ? `<span class="small" style="color:var(--red)">${esc(UI.copias.erro)}</span>` : ""}
     ${l.length ? `<div class="list">${l.map(c => `<div class="item"><div class="grow"><div class="t">${longDate(c.data)}</div><div class="s">${num((c.tam || 0) / 1024, 0)} KB</div></div><button class="linkbtn" type="button" data-a="copia-repor" data-k="${c.data}">Repor</button></div>`).join("")}</div>` : ""}
     <div style="display:flex;gap:8px;flex-wrap:wrap">${syncOn() ? '<button class="btn sm ghost" type="button" data-a="copia-fazer">Fazer cópia agora</button>' : ""}<button class="btn sm" type="button" data-a="excel">${ic("download", 16)} Exportar Excel (gastos e treinos)</button></div>
+    ${(() => { let l2 = []; try{ l2 = JSON.parse(localStorage.getItem("dia-copias") || "[]").map((c, i) => ({tipo:"s", i, data:c.data, nome:"Cópia semanal", tam:c.v.length})).concat(JSON.parse(localStorage.getItem("dia-copias-versao") || "[]").map((c, i) => ({tipo:"v", i, data:c.data, nome:`Antes de atualizar (versão ${c.versao})`, tam:c.v.length}))); }catch(e){}
+      return l2.length ? `<div class="xs muted" style="font-weight:700">Neste aparelho</div><div class="list">${l2.map(c => `<div class="item"><div class="grow"><div class="t">${esc(c.nome)}</div><div class="s">${longDate(c.data)} · ${num(c.tam / 1024, 0)} KB</div></div><button class="linkbtn" type="button" data-a="copia-local" data-t="${c.tipo}" data-i="${c.i}" data-k="${c.data}">Repor</button></div>`).join("")}</div>` : ""; })()}
     ${S.local.ultimoExcel ? `<span class="xs muted">Último Excel exportado neste aparelho: ${new Date(S.local.ultimoExcel).toLocaleString("pt-PT")}</span>` : ""}
   </section>`;
 }
@@ -2136,18 +2195,33 @@ function evoChart(evo, maxDe){
 /* ============================================================
    dia. — ações, diálogos, IA e arranque
    ============================================================ */
-let dlgCb = null;
+let dlgCb = null, dlgGen = 0, dlgFeito = false;
 function openDlg(title, inner, onOk, okLabel = "Guardar", extra = "", cancelLabel = "Cancelar"){
   const f = $("#dlgForm");
   delete f.dataset.tipoMan; delete f.dataset.sim;
-  f.innerHTML = `<h2>${esc(title)}</h2>${inner}<div class="dlg-actions">${extra}<button class="btn ghost" value="cancel" formnovalidate>${esc(cancelLabel)}</button>${onOk ? `<button class="btn" value="ok">${esc(okLabel)}</button>` : ""}</div>`;
+  dlgGen++; dlgFeito = false;
+  f.innerHTML = `<h2>${esc(title)}</h2>${inner}<div class="dlg-err" role="alert" hidden></div><div class="dlg-actions">${extra}<button class="btn ghost" value="cancel" formnovalidate>${esc(cancelLabel)}</button>${onOk ? `<button class="btn" value="ok">${esc(okLabel)}</button>` : ""}</div>`;
   dlgCb = onOk;
-  const d = $("#dlg"); d.returnValue = "cancel"; d.showModal();
+  const d = $("#dlg"); d.returnValue = "cancel"; if (!d.open) d.showModal();
   const first = f.querySelector("input:not([type=hidden]):not([type=checkbox]),select,textarea"); if (first) setTimeout(() => first.focus(), 30);
 }
+const dlgDados = f => { const fd = new FormData(f), o = {}; for (const [k, v] of fd.entries()){ if (k in o){ o[k] = [].concat(o[k], v); } else o[k] = v; } return o; };
+/* «Guardar»: valida antes de fechar; se houver erro, o diálogo fica aberto com a mensagem e nada se perde */
+$("#dlgForm").addEventListener("submit", e => {
+  if (!e.submitter || e.submitter.value !== "ok" || !dlgCb) return;
+  const f = e.target, gen = dlgGen, cb = dlgCb;
+  try{
+    cb(dlgDados(f), f); dlgFeito = true;
+    if (dlgGen !== gen) e.preventDefault();          /* o passo seguinte abriu outro diálogo */
+  }catch(err){
+    e.preventDefault();
+    const box = f.querySelector(".dlg-err"); if (box){ box.textContent = err.message || String(err); box.hidden = false; }
+    else toast(err.message || String(err));
+  }
+});
 $("#dlg").addEventListener("close", () => {
   const d = $("#dlg"), f = $("#dlgForm");
-  if (d.returnValue === "ok" && dlgCb){
+  if (d.returnValue === "ok" && dlgCb && !dlgFeito){
     const fd = new FormData(f), o = {};
     for (const [k, v] of fd.entries()){ if (k in o){ o[k] = [].concat(o[k], v); } else o[k] = v; }
     try{ dlgCb(o, f); }catch(e){ toast(e.message || String(e)); }
@@ -2166,7 +2240,11 @@ function dlgGasto(g = {}){
     <label class="field">Data<input type="date" name="data" required value="${esc(g.data || diaSel())}"></label></div>
     <label class="field">Descrição<input name="desc" value="${esc(g.desc || "")}" placeholder="Ex.: Pingo Doce"></label>
     <label class="field">Categoria<select name="cat">${opt(cats(), g.cat || "Supermercado")}</select></label>`,
-  o => { const v = pnum(o.valor); if (!v) throw new Error("Indica o valor."); put("gastos", {id:g.id, valor:v, data:o.data, desc:o.desc.trim(), cat:o.cat, origem:g.origem || "manual"}); save(); render(); toast("Gasto guardado."); });
+  (o, f) => {
+    const v = vNum(o.valor, "o valor", {max:100000}), data = vData(o.data), desc = o.desc.trim();
+    const dup = gastoParecido({valor:v, data, desc}, g.id), chave = [v, data, desc].join("|");
+    if (dup && f.dataset.dupOk !== chave){ f.dataset.dupOk = chave; throw new Error(`Parece repetido: já tens ${dupTxt(dup)}. Carrega outra vez em Guardar para registar na mesma.`); }
+    put("gastos", {id:g.id, valor:v, data, desc, cat:o.cat, origem:g.origem || "manual"}); save(); render(); toast("Gasto guardado."); });
 }
 function dlgTarefa(x = {}){
   const r = x.serie ? byId("recorr", x.serie) : null, freq = r && !r.del ? r.freq : (x.rep || "");
@@ -2181,6 +2259,8 @@ function dlgTarefa(x = {}){
     ${r && !r.del && !x._soSerie ? `<span class="xs muted">↻ Faz parte de uma tarefa que se repete (${esc(repTexto(r))}). As alterações ao texto, hora e repetição passam para as próximas vezes.</span>` : ""}
     <label class="field">Etiqueta<input name="tag" value="${esc(x.tag || "")}" placeholder="casa, trabalho, finanças…"></label>`,
   o => {
+    if (!o.t.trim()) throw new Error("Escreve a tarefa.");
+    vData(o.data, "a data", true);
     const base = {t:o.t.trim(), data:o.data, hora:o.hora, prio:o.prio, tag:o.tag.replace(/^#/, "").trim()};
     const rep = o.rep ? {freq:o.rep, dias:[].concat(o.rdias || []).map(Number), dia:Math.min(31, Math.max(1, Math.round(pnum(o.rdia)) || pdk(o.data || today()).getDate()))} : null;
     const temSerie = r && !r.del;
@@ -2215,12 +2295,12 @@ function dlgExtra(x = {}){
     <label class="field">Valor total (€, opcional)<input name="valor" inputmode="decimal" value="${+x.valor > 0 ? esc(num(x.valor, 2)) : ""}" placeholder="${vh ? "Automático: " + esc(num(vh, 2)) + " € por hora" : "Ex.: 40,00"}"></label>
     <label class="field">Nota (opcional)<input name="nota" value="${esc(x.nota || "")}" placeholder="Ex.: ficar mais 2 h no turno"></label>
     <span class="xs muted">Entra no vencimento ${S.cfg.heMesSeguinte === false ? "do próprio mês" : "do mês seguinte"} como trabalho suplementar.</span>`,
-  o => { const h = pnum(o.horas); if (!h) throw new Error("Indica as horas."); put("extras", {id:x.id, data:o.data, horas:h, valor:pnum(o.valor) || 0, nota:o.nota.trim()}); save(); render(); toast("Horas extra guardadas."); });
+  o => { vData(o.data, "o dia"); const h = vNum(o.horas, "as horas", {max:24}); vNum(o.valor, "o valor", {opc:true, min:0, max:10000}); put("extras", {id:x.id, data:o.data, horas:h, valor:pnum(o.valor) || 0, nota:o.nota.trim()}); save(); render(); toast("Horas extra guardadas."); });
 }
 function dlgEvento(e = {}, k){
   openDlg("Novo compromisso", `<label class="field">O quê<input name="t" required value="${esc(e.t || "")}" placeholder="Ex.: Dentista"></label>
     <div class="fields"><label class="field">Data<input type="date" name="data" required value="${esc(e.data || k || diaSel())}"></label><label class="field">Hora<input type="time" name="hora" value="${esc(e.hora || "")}"></label><label class="field">Duração (min)<input name="dur" inputmode="numeric" value="${esc(e.dur || 60)}"></label></div>`,
-  o => { put("eventos", {id:e.id, t:o.t.trim(), data:o.data, hora:o.hora, dur:Math.max(5, pnum(o.dur) || 60)}); save(); render(); toast("Compromisso guardado."); });
+  o => { if (!o.t.trim()) throw new Error("Escreve o que é."); vData(o.data); put("eventos", {id:e.id, t:o.t.trim(), data:o.data, hora:o.hora, dur:Math.max(5, pnum(o.dur) || 60)}); save(); render(); toast("Compromisso guardado."); });
 }
 function dlgRefeicao(r = {}){
   const hora = r.hora || nowHM();
@@ -2245,7 +2325,7 @@ function dlgFixo(f = {}){
   openDlg(f.id ? "Editar despesa fixa" : "Nova despesa fixa", `<label class="field">Descrição<input name="desc" required value="${esc(f.desc || "")}" placeholder="Ex.: Renda"></label>
     <div class="fields"><label class="field">Valor (€)<input name="valor" inputmode="decimal" required value="${f.valor != null ? esc(num(f.valor, 2)) : ""}"></label><label class="field">Dia do mês<input name="dia" inputmode="numeric" required value="${esc(f.dia || 1)}"></label></div>
     <label class="field">Categoria<select name="cat">${opt(cats(), f.cat || "Casa e contas")}</select></label>`,
-  o => { put("fixos", {id:f.id, desc:o.desc.trim(), valor:pnum(o.valor), dia:Math.min(31, Math.max(1, Math.round(pnum(o.dia)) || 1)), cat:o.cat}); applyFixos(); save(); render(); });
+  o => { const valor = vNum(o.valor, "o valor", {max:100000}), dia = vNum(o.dia, "o dia do mês", {min:1, max:31}); put("fixos", {id:f.id, desc:o.desc.trim(), valor, dia:Math.round(dia), cat:o.cat}); applyFixos(); save(); render(); });
 }
 function dlgOrc(){
   const o = S.cfg.orc;
@@ -2254,7 +2334,7 @@ function dlgOrc(){
     <label class="field">Nova categoria (opcional)<input name="nova" placeholder="Ex.: Carro"></label>`,
   v => {
     const orc = {};
-    Object.keys(v).forEach(k => { if (k.startsWith("c:")) orc[k.slice(2)] = pnum(v[k]); });
+    Object.keys(v).forEach(k => { if (k.startsWith("c:")) orc[k.slice(2)] = vNum(v[k], "o orçamento de " + k.slice(2), {opc:true, min:0, max:1e6}); });
     if (v.nova && v.nova.trim()) orc[v.nova.trim()] = 0;
     setCfg({orc}); save(); render();
   });
@@ -2269,7 +2349,7 @@ function dlgDay(k){
     <span class="xs muted">As trocas e horas extra contam no vencimento previsto desta app. Para o recibo oficial, regista-as também na app Vencimentos.</span>`,
   o => {
     if (o.s === "auto"){ if (own) remove("turnos", k); } else put("turnos", {id:k, s:o.s, com:(o.com || "").trim()});
-    if (pnum(o.he) > 0) put("extras", {data:k, horas:pnum(o.he), valor:0, nota:""});
+    if (vNum(o.he, "as horas extra", {opc:true, min:0, max:24}) > 0) put("extras", {data:k, horas:pnum(o.he), valor:0, nota:""});
     if (o.t && o.t.trim()) put("eventos", {t:o.t.trim(), data:k, hora:o.hora, dur:60});
     save(); render();
   });
@@ -2291,8 +2371,9 @@ function dlgObj(o = {}, depois){
     <div class="fields"><label class="field">Quanto queres juntar (€)<input name="alvo" inputmode="decimal" value="${o.alvo ? esc(num(o.alvo, 2)) : ""}" placeholder="Opcional"></label><label class="field">Até quando<input type="date" name="data" value="${esc(o.data || "")}"></label></div>
     ${o.id ? "" : `<label class="field">Já tens algum valor guardado? (€)<input name="ini" inputmode="decimal" placeholder="0"></label>`}`,
   v => {
-    const n = put("poupObj", {id:o.id, nome:v.nome.trim(), alvo:pnum(v.alvo), data:v.data});
-    if (!o.id && pnum(v.ini)) put("poupMov", {obj:n.id, data:today(), valor:pnum(v.ini), nota:"Valor inicial"});
+    const alvo = vNum(v.alvo, "o valor a juntar", {opc:true, min:0}), ini = vNum(v.ini, "o valor já guardado", {opc:true, min:0}); vData(v.data, "a data", true);
+    const n = put("poupObj", {id:o.id, nome:v.nome.trim(), alvo, data:v.data});
+    if (!o.id && ini) put("poupMov", {obj:n.id, data:today(), valor:ini, nota:"Valor inicial"});
     save(); render();
     if (depois) setTimeout(() => depois(n), 80);
   }, "Guardar", o.id ? `<button class="btn danger" type="button" data-a="del-obj" data-id="${o.id}" style="margin-right:auto">Apagar</button>` : "");
@@ -2303,7 +2384,7 @@ function dlgMov(objId, sinal = 1, valor){
   openDlg(sinal > 0 ? "Depositar na poupança" : "Retirar da poupança", `<label class="field">Objetivo<select name="obj">${opt(objs.map(o => [o.id, o.nome]), objId || objs[0].id)}</select></label>
     <div class="fields"><label class="field">Valor (€)<input name="valor" inputmode="decimal" required value="${valor ? esc(num(valor, 2)) : ""}"></label><label class="field">Data<input type="date" name="data" value="${diaSel()}"></label></div>
     <label class="field">Nota<input name="nota" placeholder="Opcional"></label>`,
-  v => { const x = Math.abs(pnum(v.valor)); if (!x) throw new Error("Indica o valor."); put("poupMov", {obj:v.obj, data:v.data || diaSel(), valor:sinal * x, nota:v.nota.trim(), origem:"manual"}); save(); render(); toast(sinal > 0 ? "Depósito registado." : "Levantamento registado."); }, sinal > 0 ? "Depositar" : "Retirar");
+  v => { const x = vNum(v.valor, "o valor"); vData(v.data, "a data", true); put("poupMov", {obj:v.obj, data:v.data || diaSel(), valor:sinal * x, nota:v.nota.trim(), origem:"manual"}); save(); render(); toast(sinal > 0 ? "Depósito registado." : "Levantamento registado."); }, sinal > 0 ? "Depositar" : "Retirar");
 }
 async function analisarGastos(){
   if (!syncOn()){ toast("A análise usa a IA: liga primeiro o servidor nas Definições."); return; }
@@ -2328,7 +2409,7 @@ function dlgAuto(a = {}){
   openDlg(a.id ? "Editar poupança automática" : "Nova poupança automática", `<label class="field">Objetivo<select name="obj">${opt(objs.map(o => [o.id, o.nome]), a.obj || (objs[0] || {}).id)}</select></label>
     <div class="fields"><label class="field">Valor por mês (€)<input name="valor" inputmode="decimal" required value="${a.valor ? esc(num(r2(a.valor), 2)) : ""}"></label><label class="field">Dia do mês<input name="dia" inputmode="numeric" required value="${esc(a.dia || 25)}"></label></div>
     <span class="xs muted">Dica: põe o dia a seguir ao dia em que recebes o vencimento.</span>`,
-  v => { put("poupAuto", {id:a.id, obj:v.obj, valor:Math.abs(pnum(v.valor)), dia:Math.min(31, Math.max(1, Math.round(pnum(v.dia)) || 1)), desde:a.desde || today()}); applyPoupAuto(); save(); render(); });
+  v => { const valor = vNum(v.valor, "o valor"), dia = vNum(v.dia, "o dia do mês", {min:1, max:31}); put("poupAuto", {id:a.id, obj:v.obj, valor, dia:Math.round(dia), desde:a.desde || today()}); applyPoupAuto(); save(); render(); });
 }
 
 /* ---------- IA ---------- */
@@ -2377,7 +2458,9 @@ async function aiFiles(files, sec){
         resumo = `${resumo} ${turnos.length} dias lidos · ${diff.length} diferente${diff.length === 1 ? "" : "s"} do horário atual.`.trim();
       }
       const novos = itens.filter(i => i.tipo === "gasto");
-      novos.forEach(i => { i.data = i.data || today(); if (gastoExiste(i)) i._dup = true; });
+      novos.forEach(i => { i.data = i.data || today(); const d = gastoParecido(i); if (d){ i._dup = true; i._dupTxt = dupTxt(d); } });
+      /* repetidos dentro do próprio documento (ex.: o mesmo extrato colado duas vezes) */
+      novos.forEach((i, n) => { if (!i._dup && novos.slice(0, n).some(j => Math.abs(pnum(j.valor) - pnum(i.valor)) < .01 && j.data === i.data && normDesc(j.desc) === normDesc(i.desc))){ i._dup = true; i._dupTxt = "repetido neste documento"; } });
       const dups = novos.filter(i => i._dup).length;
       if (dups) resumo = `${resumo} ${dups} já ${dups === 1 ? "estava registado" : "estavam registados"} e fica${dups === 1 ? "" : "m"} de fora.`.trim();
       Object.assign(entry, {estado:"ok", resumo, itens, extrato:novos.length >= 5});
@@ -2409,6 +2492,9 @@ const A = {
   "excel": () => exportarExcel(),
   "resumo": el => dlgResumo(el.dataset.k),
   "notif-on": () => ativarNotif(), "notif-off": () => desativarNotif(), "notif-test": () => testarNotif(),
+  "copia-local": el => openDlg("Repor esta cópia?", `<span class="small">A cópia de ${longDate(el.dataset.k)} volta a entrar: o que apagaste depois reaparece. O que criaste ou alteraste depois fica como está.</span>`, () => {
+    const arr = JSON.parse(localStorage.getItem(el.dataset.t === "v" ? "dia-copias-versao" : "dia-copias") || "[]"), c = arr[+el.dataset.i];
+    if (!c) throw new Error("Cópia não encontrada."); reporCopia(JSON.parse(c.v)); save(); render(); toast("Cópia reposta."); }, "Repor"),
   "copia-fazer": async () => { try{ await api("/api/copias/fazer"); toast("Cópia guardada no servidor."); listarCopias(); }catch(e){ toast("Erro: " + (e.message || e)); } },
   "copia-repor": el => openDlg("Repor esta cópia?", `<span class="small">A cópia de ${longDate(el.dataset.k)} volta a entrar: o que apagaste depois dessa data reaparece. O que criaste ou alteraste depois fica como está.</span>`, async () => {
     try{ const j = await api("/api/copias/ler", {data:el.dataset.k}); reporCopia(j.v); save(); render(); toast("Cópia reposta."); }catch(e){ toast("Erro: " + (e.message || e)); }
@@ -2583,6 +2669,7 @@ window.addEventListener("drop", e => {
 
 /* ---------- arranque ---------- */
 function boot(){
+  copiaVersao();
   let ch = readVencLocal();
   ch = migrarRep() || ch;
   ch = ensureRecorr() || ch;
@@ -2778,8 +2865,13 @@ function dlgCredito(c = {}){
     <label class="item" style="border:0;min-height:40px"><input class="check" type="checkbox" name="gastos" value="1" ${c.gastos !== false ? "checked" : ""}> <span class="small" style="font-weight:700">Lançar a prestação em Gastos todos os meses (categoria «Créditos»)</span></label>
     <span class="xs muted">Com a TAN preenchida, a app separa juros e capital em cada prestação e calcula quando o crédito fica pago.</span>`,
   o => {
-    const total = pnum(o.total); if (!total) throw new Error("Indica o valor total do crédito.");
-    const abat = Math.min(total, pnum(o.abatido));
+    if (!o.nome.trim()) throw new Error("Dá um nome ao crédito.");
+    const total = vNum(o.total, "o valor total do crédito", {max:5e6});
+    const abat = vNum(o.abatido, "o valor já abatido", {opc:true, min:0, max:5e6});
+    if (abat > total) throw new Error("O valor já abatido não pode ser maior do que o valor total.");
+    const prest = vNum(o.prestacao, "a prestação", {opc:true, min:0, max:1e5});
+    vNum(o.dia, "o dia da prestação", {opc:true, min:1, max:31}); vNum(o.taxa, "a TAN", {opc:true, min:0, max:30});
+    if (prest > 0 && +pnum(o.taxa) > 0 && prest <= (total - abat) * pnum(o.taxa) / 1200) throw new Error("A prestação não chega para pagar os juros mensais: confirma a prestação e a TAN.");
     const base = {id:c.id, nome:o.nome.trim(), total, prestacao:pnum(o.prestacao), dia:Math.min(31, Math.max(0, Math.round(pnum(o.dia)))), taxa:pnum(o.taxa), banco:o.banco.trim(), auto:!!o.auto, gastos:!!o.gastos};
     if (!c.id){ base.desde = today(); base.abatidoIni = abat; put("creditos", base); }
     else {
@@ -2796,13 +2888,13 @@ function dlgCredPag(c){
   openDlg(`Pagamento · ${c.nome}`, `<div class="fields"><label class="field">Valor abatido ao capital (€)<input name="valor" inputmode="decimal" required value="${sug ? esc(num(sug, 2)) : ""}"></label><label class="field">Data<input type="date" name="data" required value="${esc(diaSel())}"></label></div>
     <label class="field">Nota (opcional)<input name="nota" placeholder="Ex.: amortização antecipada"></label>
     <span class="xs muted">${sug ? `Sugestão: prestação ${eur(c.prestacao)}${juros ? ` menos ${eur(juros)} de juros` : ""}. ` : ""}Em dívida: ${eur(x.div)}.</span>`,
-  o => { const v = pnum(o.valor); if (!v) throw new Error("Indica o valor."); put("credMov", {cred:c.id, data:o.data, valor:Math.min(v, x.div || v), nota:o.nota.trim(), origem:"manual"}); save(); render(); toast("Pagamento registado."); });
+  o => { const v = vNum(o.valor, "o valor"); vData(o.data); if (v > x.div + .005) throw new Error(`O valor é maior do que o que está em dívida (${eur(x.div)}).`); put("credMov", {cred:c.id, data:o.data, valor:Math.min(v, x.div || v), nota:o.nota.trim(), origem:"manual"}); save(); render(); toast("Pagamento registado."); });
 }
 function dlgCredSaldo(c){
   const x = credInfo(c);
   openDlg(`Valor em dívida · ${c.nome}`, `<span class="small muted">Escreve o capital em dívida que aparece no banco. A app regista a diferença como valor abatido.</span>
     <div class="fields"><label class="field">Em dívida hoje (€)<input name="div" inputmode="decimal" required value="${esc(num(x.div, 2))}"></label><label class="field">Data<input type="date" name="data" value="${esc(today())}"></label></div>`,
-  o => { const novo = Math.max(0, pnum(o.div)), dif = r2(x.div - novo); if (Math.abs(dif) < .01) return; put("credMov", {cred:c.id, data:o.data || today(), valor:dif, nota:"Atualizado com o valor do banco", origem:"acerto"}); save(); render(); toast(`Atualizado: ${eur(novo)} em dívida.`); });
+  o => { const novo = vNum(o.div, "o valor em dívida", {min:0, max:x.total}); vData(o.data, "a data", true); const dif = r2(x.div - novo); if (Math.abs(dif) < .01) return; put("credMov", {cred:c.id, data:o.data || today(), valor:dif, nota:"Atualizado com o valor do banco", origem:"acerto"}); save(); render(); toast(`Atualizado: ${eur(novo)} em dívida.`); });
 }
 /* folha de Excel com os créditos */
 function credFolha(){
@@ -2842,7 +2934,7 @@ function dlgPrazo(p = {}){
     <label class="field">Repete<select name="rep">${opt(PRAZO_REP(), String(p.rep ?? 12))}</select></label>
     <label class="field">Avisar antes (dias)<input name="aviso" inputmode="numeric" value="${esc(p.aviso || 30)}"></label></div>
     <label class="field">Nota (opcional)<input name="nota" value="${esc(p.nota || "")}" placeholder="Ex.: matrícula, n.º da apólice, valor"></label>`,
-  o => { if (!o.data) throw new Error("Indica a data."); put("prazos", {id:p.id, nome:o.nome.trim(), data:o.data, rep:+o.rep || 0, aviso:Math.max(1, Math.round(pnum(o.aviso)) || 30), nota:o.nota.trim()}); save(); render(); toast("Prazo guardado."); },
+  o => { if (!o.nome.trim()) throw new Error("Escreve o que é."); vData(o.data, "a data limite"); vNum(o.aviso, "os dias de aviso", {opc:true, min:1, max:3650}); put("prazos", {id:p.id, nome:o.nome.trim(), data:o.data, rep:+o.rep || 0, aviso:Math.max(1, Math.round(pnum(o.aviso)) || 30), nota:o.nota.trim()}); save(); render(); toast("Prazo guardado."); },
   "Guardar", p.id ? `<button class="btn danger" type="button" data-a="del-prazo" data-id="${p.id}" style="margin-right:auto">Apagar</button>` : "");
 }
 /* «Tratado»: passa para a próxima data (ou arquiva se não repete) */
@@ -2882,7 +2974,7 @@ function dlgSub(s = {}){
     <div class="fields"><label class="field">Próxima renovação<input type="date" name="data" required value="${esc(s.id ? subProxima(s) : (s.data || ""))}"></label>
     <label class="field">Avisar antes (dias)<input name="aviso" inputmode="numeric" value="${esc(s.aviso || 3)}"></label></div>
     <label class="field">Categoria<select name="cat">${opt(cats(), s.cat || guessCat(s.nome || "") || "Lazer")}</select></label>`,
-  o => { const v = pnum(o.valor); if (!v) throw new Error("Indica o valor."); if (!o.data) throw new Error("Indica a data da próxima renovação."); put("assinaturas", {id:s.id, nome:o.nome.trim(), valor:v, freq:o.freq, data:o.data, aviso:Math.max(0, Math.round(pnum(o.aviso))), cat:o.cat}); save(); render(); toast("Subscrição guardada."); },
+  o => { if (!o.nome.trim()) throw new Error("Escreve o nome."); const v = vNum(o.valor, "o valor", {max:100000}); vData(o.data, "a data da próxima renovação"); vNum(o.aviso, "os dias de aviso", {opc:true, min:0, max:60}); put("assinaturas", {id:s.id, nome:o.nome.trim(), valor:v, freq:o.freq, data:o.data, aviso:Math.max(0, Math.round(pnum(o.aviso))), cat:o.cat}); save(); render(); toast("Subscrição guardada."); },
   "Guardar", s.id ? `<button class="btn danger" type="button" data-a="del-sub" data-id="${s.id}" style="margin-right:auto">Apagar</button>` : "");
 }
 function subsCard(){
@@ -2941,7 +3033,7 @@ function dlgSimular(c){
     <div class="seg" role="radiogroup" aria-label="O que reduzir" style="align-self:flex-start"><label style="display:inline-flex;align-items:center;gap:6px;padding:8px 12px"><input type="radio" name="modo" value="prazo" data-sim="1" checked> Reduzir o prazo</label><label style="display:inline-flex;align-items:center;gap:6px;padding:8px 12px"><input type="radio" name="modo" value="prestacao" data-sim="1"> Reduzir a prestação</label></div>
     <div id="simOut"><div class="small muted">Escreve o valor que pensas amortizar.</div></div>
     <span class="xs muted">Comissão habitual: 0,5 % em taxa variável e 2 % em taxa fixa (crédito habitação). Simulação com a TAN e a prestação atuais: o banco pode dar valores ligeiramente diferentes.</span>`,
-  o => { const v = pnum(o.valor); if (!v) return; const x = credInfo(c); put("credMov", {cred:c.id, data:today(), valor:Math.min(v, x.div), nota:"Amortização antecipada", origem:"manual"});
+  o => { const v = vNum(o.valor, "o valor a amortizar"); const x = credInfo(c); if (v > x.div + .005) throw new Error(`O valor é maior do que o que está em dívida (${eur(x.div)}).`); put("credMov", {cred:c.id, data:today(), valor:Math.min(v, x.div), nota:"Amortização antecipada", origem:"manual"});
     if (o.modo === "prestacao"){ const s = simCalc(c, v, 0, "prestacao"); if (s.novo && s.novo.P) put("creditos", {id:c.id, prestacao:s.novo.P}); }
     save(); render(); toast("Amortização registada."); }, "Registar esta amortização", "", "Fechar");
   $("#dlgForm").dataset.sim = c.id;
@@ -2975,13 +3067,13 @@ Object.assign(A, {
    dia. — comando por voz e ligação Google
    ============================================================ */
 const GSCRIPT = "/* ============================================================\n   dia. \u2014 liga\u00e7\u00e3o ao Gmail e ao Google Calend\u00e1rio\n   Corre na tua conta Google (script.google.com). N\u00e3o precisa de\n   projeto na Google Cloud. De 15 em 15 minutos:\n   1. l\u00ea o teu calend\u00e1rio e envia os compromissos para a app;\n   2. escreve os teus turnos e treinos num calend\u00e1rio \u00abdia.\u00bb;\n   3. procura emails com faturas, avisos ou escalas e envia-os\n      para a IA da app (aparecem em \u00abEntrou sozinho\u00bb).\n   ============================================================ */\nconst CONFIG = {\n  URL: \"__URL__\",                 // endere\u00e7o do servidor (Cloudflare Worker)\n  CODIGO: \"__CODIGO__\",           // o teu c\u00f3digo pessoal da app\n  CALENDARIO_LER: \"principal\",    // \"principal\" ou o ID de outro calend\u00e1rio\n  CALENDARIO_TURNOS: \"dia. \u00b7 turnos e treinos\",\n  DIAS: 35,                       // quantos dias para a frente\n  LER_GMAIL: true,\n  GMAIL_PESQUISA: 'newer_than:3d -label:dia-lido (label:dia OR (has:attachment (fatura OR factura OR recibo OR escala OR \"aviso de pagamento\" OR \"nota de cobran\u00e7a\" OR \"documento de cobran\u00e7a\")))',\n  GMAIL_MAX: 8\n};\n\n/* Corre esta fun\u00e7\u00e3o UMA vez: pede autoriza\u00e7\u00e3o e liga a sincroniza\u00e7\u00e3o autom\u00e1tica. */\nfunction instalar(){\n  ScriptApp.getProjectTriggers().filter(t => t.getHandlerFunction() === \"sincronizar\").forEach(t => ScriptApp.deleteTrigger(t));\n  ScriptApp.newTrigger(\"sincronizar\").timeBased().everyMinutes(15).create();\n  sincronizar();\n  Logger.log(\"Feito. A liga\u00e7\u00e3o corre sozinha de 15 em 15 minutos.\");\n}\n\nfunction sincronizar(){\n  const erros = [];\n  try{ lerCalendario(); }catch(e){ erros.push(\"Calend\u00e1rio: \" + e.message); }\n  try{ escreverTurnos(); }catch(e){ erros.push(\"Turnos: \" + e.message); }\n  if (CONFIG.LER_GMAIL){ try{ lerGmail(); }catch(e){ erros.push(\"Gmail: \" + e.message); } }\n  if (erros.length) throw new Error(erros.join(\" | \"));\n}\n\n/* ---------- utilit\u00e1rios ---------- */\nfunction enviar(caminho, corpo){\n  corpo.code = CONFIG.CODIGO;\n  const r = UrlFetchApp.fetch(CONFIG.URL.replace(/\\/+$/, \"\") + caminho, {method:\"post\", contentType:\"application/json\", payload:JSON.stringify(corpo), muteHttpExceptions:true});\n  let j = {}; try{ j = JSON.parse(r.getContentText() || \"{}\"); }catch(e){}\n  if (r.getResponseCode() >= 300) throw new Error(j.error || (\"erro \" + r.getResponseCode()));\n  return j;\n}\nconst TZ = () => Session.getScriptTimeZone();\nconst dia = d => Utilities.formatDate(d, TZ(), \"yyyy-MM-dd\");\nconst hora = d => Utilities.formatDate(d, TZ(), \"HH:mm\");\nfunction paraData(s){ const m = /^(\\d{4})-(\\d{2})-(\\d{2})T(\\d{2}):(\\d{2})/.exec(s); return new Date(+m[1], +m[2] - 1, +m[3], +m[4], +m[5]); }\n\n/* ---------- 1. calend\u00e1rio \u2192 app ---------- */\nfunction lerCalendario(){\n  const cal = CONFIG.CALENDARIO_LER === \"principal\" ? CalendarApp.getDefaultCalendar() : CalendarApp.getCalendarById(CONFIG.CALENDARIO_LER);\n  if (!cal) throw new Error(\"calend\u00e1rio n\u00e3o encontrado\");\n  const ini = new Date(); ini.setHours(0, 0, 0, 0); ini.setDate(ini.getDate() - 1);\n  const fim = new Date(ini.getTime() + (CONFIG.DIAS + 1) * 86400000);\n  const eventos = cal.getEvents(ini, fim).map(e => {\n    const a = e.getStartTime(), b = e.getEndTime(), todoDia = e.isAllDayEvent();\n    return {gid:e.getId() + \"|\" + a.getTime(), t:e.getTitle(), data:dia(a), hora:todoDia ? \"\" : hora(a), dur:todoDia ? 60 : Math.round((b - a) / 60000), local:e.getLocation() || \"\"};\n  });\n  enviar(\"/api/google\", {tipo:\"agenda\", ini:dia(ini), fim:dia(fim), eventos});\n}\n\n/* ---------- 2. turnos e treinos da app \u2192 calend\u00e1rio \u00abdia.\u00bb ---------- */\nfunction escreverTurnos(){\n  const j = enviar(\"/api/google\", {tipo:\"turnos\"});\n  const itens = j.itens || [];\n  let cal = CalendarApp.getCalendarsByName(CONFIG.CALENDARIO_TURNOS)[0];\n  if (!cal) cal = CalendarApp.createCalendar(CONFIG.CALENDARIO_TURNOS, {color:CalendarApp.Color.YELLOW});\n  const ini = new Date(); ini.setHours(0, 0, 0, 0);\n  const fim = new Date(ini.getTime() + (CONFIG.DIAS + 2) * 86400000);\n  const existentes = {};\n  cal.getEvents(ini, fim).forEach(e => { const id = e.getTag(\"dia-id\"); if (id) existentes[id] = e; else e.deleteEvent(); });\n  const queremos = {};\n  itens.forEach(it => {\n    queremos[it.id] = true;\n    const a = paraData(it.ini), b = paraData(it.fim), e = existentes[it.id];\n    if (e && e.getTitle() === it.t && e.getStartTime().getTime() === a.getTime() && e.getEndTime().getTime() === b.getTime()) return;\n    if (e) e.deleteEvent();\n    const n = cal.createEvent(it.t, a, b);\n    n.setTag(\"dia-id\", it.id);\n  });\n  Object.keys(existentes).forEach(id => { if (!queremos[id]) existentes[id].deleteEvent(); });\n}\n\n/* ---------- 3. Gmail \u2192 IA da app ---------- */\nfunction lerGmail(){\n  const lido = GmailApp.getUserLabelByName(\"dia-lido\") || GmailApp.createLabel(\"dia-lido\");\n  GmailApp.search(CONFIG.GMAIL_PESQUISA, 0, CONFIG.GMAIL_MAX).forEach(th => {\n    const m = th.getMessages().pop(), assunto = m.getSubject(), de = m.getFrom();\n    const anexos = m.getAttachments({includeInlineImages:false}).filter(a => /pdf|image\\//.test(a.getContentType()) && a.getSize() < 8e6).slice(0, 2);\n    if (anexos.length){\n      anexos.forEach(a => enviar(\"/api/google\", {tipo:\"email\", assunto, de, ficheiro:{nome:a.getName(), mime:a.getContentType().indexOf(\"pdf\") >= 0 ? \"application/pdf\" : a.getContentType(), b64:Utilities.base64Encode(a.getBytes())}}));\n    } else {\n      enviar(\"/api/google\", {tipo:\"email\", assunto, de, ficheiro:{nome:assunto, mime:\"text/plain\", texto:\"De: \" + de + \"\\nAssunto: \" + assunto + \"\\nData: \" + m.getDate() + \"\\n\\n\" + m.getPlainBody().slice(0, 20000)}});\n    }\n    th.addLabel(lido);\n  });\n}\n";
-const V = {ouvindo:false, gravando:false, texto:"", estado:"", resposta:"", feitos:[], undo:[], erro:"", srFalhou:false, rec:null, mr:null, stream:null, timer:null};
+const V = {ouvindo:false, gravando:false, texto:"", estado:"", resposta:"", feitos:[], undo:[], pend:[], erro:"", srFalhou:false, rec:null, mr:null, stream:null, timer:null};
 
 /* iPhone/iPad: o microfone só pode ser ligado por um toque direto, e na app instalada o reconhecimento do Safari falha muitas vezes */
 const IS_IOS = /iP(hone|ad|od)/.test(navigator.userAgent) || (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1);
 const IS_STANDALONE = navigator.standalone === true || matchMedia("(display-mode: standalone)").matches;
 function abrirVoz(){
-  Object.assign(V, {texto:"", estado:"", resposta:"", feitos:[], undo:[], erro:""});
+  Object.assign(V, {texto:"", estado:"", resposta:"", feitos:[], undo:[], pend:[], erro:""});
   openDlg("Comando de voz", `<div id="vozBox" class="voz"></div>`, null, "", "", "Fechar");
   vozUI();
   if (!IS_IOS) setTimeout(vozMic, 150);
@@ -2994,6 +3086,8 @@ function vozUI(){
     <div class="small muted" aria-live="polite">${esc(V.erro || V.estado || (on ? (V.gravando ? "A gravar… fala e toca outra vez no microfone para terminar." : "A ouvir…") : "Toca no microfone e fala."))}</div>
     ${V.texto ? `<div class="voz-txt">«${esc(V.texto)}»</div>` : ""}
     ${V.resposta ? `<div class="voz-res">${esc(V.resposta)}</div>` : ""}
+    ${V.pend.length ? `<div class="list" style="width:100%">${V.pend.map(a => { const d = a.tipo === "gasto" && gastoParecido(a); return `<div class="item"><span class="chip c-media">Confirmar</span><span class="grow small">${esc(itemTitle(a))}${itemSub(a) ? " · " + esc(itemSub(a)) : ""}${d ? `<br><span style="color:var(--red);font-weight:700">Parece repetido: já tens ${esc(dupTxt(d))}</span>` : ""}</span></div>`; }).join("")}</div>
+      <div style="display:flex;gap:8px"><button class="btn acc" type="button" data-a="voz-ok">Confirmar</button><button class="btn ghost" type="button" data-a="voz-no">Cancelar</button></div>` : ""}
     ${V.feitos.length ? `<div class="list" style="width:100%">${V.feitos.map(f => `<div class="item"><span class="chip c-ok">Feito</span><span class="grow small">${esc(f)}</span></div>`).join("")}</div>
       <button class="btn sm ghost" type="button" data-a="voz-desfazer">Desfazer</button>` : ""}
     <div class="voz-in"><label for="vozIn" class="sr">Escrever comando</label><input id="vozIn" class="input" placeholder="Ou escreve aqui o pedido…" autocomplete="off"><button class="btn sm" type="button" data-a="voz-enviar">Enviar</button></div>
@@ -3069,7 +3163,7 @@ function ctxComando(){
 async function executarComando(texto){
   texto = String(texto || "").trim(); if (!texto) return;
   if (V.ouvindo){ try{ const r = V.rec; r.onend = r.onresult = r.onerror = null; r.abort(); }catch(e){} V.ouvindo = false; }
-  V.texto = texto; V.erro = ""; V.estado = "A tratar do pedido…"; V.resposta = ""; V.feitos = []; V.undo = []; vozUI();
+  V.texto = texto; V.erro = ""; V.estado = "A tratar do pedido…"; V.resposta = ""; V.feitos = []; V.undo = []; V.pend = []; vozUI();
   /* a comida saiu da app: a voz já não regista refeições nem água */
   if (SEM_COMIDA.test(texto)){ V.estado = ""; V.resposta = "A comida já não faz parte da app, por isso não registei nada."; vozUI(); falar(V.resposta); return; }
   let out = null;
@@ -3080,8 +3174,11 @@ async function executarComando(texto){
   if (!out || (!out.resposta && !(out.acoes || []).length)) out = comandoLocal(texto) || {resposta:"Não percebi. Experimenta, por exemplo: «gastei 10 euros no café» ou «lembra-me de ligar ao banco amanhã».", acoes:[]};
   aplicarAcoes(out.acoes || []);
   /* a IA respondeu mas não mandou nenhuma ação: tenta os comandos simples */
-  if (!V.feitos.length){ const loc = comandoLocal(texto); if (loc && loc.acoes.length){ aplicarAcoes(loc.acoes); if (!out.resposta) out.resposta = loc.resposta; } }
-  V.resposta = out.resposta || (V.feitos.length ? "Feito." : ""); V.estado = "";
+  if (!V.feitos.length && !V.pend.length){ const loc = comandoLocal(texto); if (loc && loc.acoes.length){ aplicarAcoes(loc.acoes); if (!out.resposta) out.resposta = loc.resposta; } }
+  V.resposta = out.resposta || (V.feitos.length ? "Feito." : "");
+  /* dinheiro nunca entra sem confirmação */
+  if (V.pend.length) V.resposta = V.pend.length === 1 ? `Confirma: ${itemTitle(V.pend[0])}${itemSub(V.pend[0]) ? ", " + itemSub(V.pend[0]) : ""}.` : `Confirma os ${V.pend.length} movimentos.`;
+  V.estado = "";
   vozUI(); falar(V.resposta);
   save(); render();
 }
@@ -3124,6 +3221,7 @@ function aplicarAcoes(acoes){
       V.undo.push(() => { const nx = (byId("tarefas", a.id) || {}).gerou; if (nx) remove("tarefas", nx); put("tarefas", {id:a.id, feito:false, gerou:null}); });
       return;
     }
+    if (a.tipo === "gasto" || a.tipo === "poupanca"){ V.pend.push(a); return; }
     const r = applyItem(a, a.tipo === "gasto" ? "voz" : "ia");
     if (r){ V.feitos.push(itemTitle(a) + (itemSub(a) ? " · " + itemSub(a) : "")); V.undo.push(() => remove(r[0], r[1])); }
   });
@@ -3170,6 +3268,8 @@ function comandoLocal(txt){
 /* ---------- ações ligadas a voz e Google ---------- */
 A["voz-mic"] = () => vozMic();
 A["voz-enviar"] = () => { const i = document.getElementById("vozIn"); if (i && i.value.trim()){ const v = i.value; i.value = ""; executarComando(v); } };
+A["voz-ok"] = () => { V.pend.forEach(a => { const r = applyItem(a, a.tipo === "gasto" ? "voz" : "ia"); if (r){ V.feitos.push(itemTitle(a) + (itemSub(a) ? " · " + itemSub(a) : "")); V.undo.push(() => remove(r[0], r[1])); } }); V.pend = []; V.resposta = "Registado."; save(); pendingRender = true; vozUI(); falar(V.resposta); };
+A["voz-no"] = () => { V.pend = []; V.resposta = "Cancelado. Não registei nada."; vozUI(); };
 A["voz-desfazer"] = () => { V.undo.reverse().forEach(f => { try{ f(); }catch(e){} }); V.undo = []; V.feitos = []; V.resposta = "Desfeito."; save(); pendingRender = true; vozUI(); };
 A["gscript"] = async () => {
   const code = GSCRIPT.replace("__URL__", apiBase()).replace("__CODIGO__", S.local.sync.code);
