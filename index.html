@@ -386,6 +386,14 @@ pre{white-space:pre-wrap; overflow-wrap:anywhere; background:var(--soft); paddin
 @media (max-width:420px){ .credrow{gap:6px} .credrow .v{font-size:15px} }
 a.linkbtn{text-decoration:none}
 .dlg-err{background:var(--red-soft); color:var(--red); border-radius:12px; padding:10px 12px; font-size:14px; font-weight:700}
+.pordia{display:flex; flex-wrap:wrap; align-items:center; gap:6px 18px; border-top:1px solid rgba(0,0,0,.12); padding-top:10px}
+.pordia .v{font-size:28px; font-weight:800; letter-spacing:-.02em; line-height:1.1}
+.card:not(.acc) .pordia{border-top-color:var(--line)}
+.chart .col i.proj{background:transparent; border:2px dashed var(--muted); border-bottom:0; border-radius:8px 8px 0 0; opacity:.6; min-height:0}
+.chart .col i.proj + i{border-radius:0 0 4px 4px}
+table.cmp{width:100%; border-collapse:collapse; font-size:14px}
+table.cmp td{padding:7px 4px; border-bottom:1px solid var(--line)}
+table.cmp td.n{text-align:right; white-space:nowrap; font-variant-numeric:tabular-nums}
 
 </style>
 </head>
@@ -414,10 +422,10 @@ a.linkbtn{text-decoration:none}
 /* ============================================================
    dia. — núcleo: dados, datas, sincronização, horário
    ============================================================ */
-const APP_VERSION = "3.6 · 02/11/2026";
+const APP_VERSION = "3.7 · 02/11/2026";
 const KEY = "dia-app-v1";
 const VENC_KEY = "vencimento-app-v1";
-const COLS = ["tarefas","eventos","gastos","fixos","refeicoes","agua","treinos","sessoes","inbox","turnos","saude","poupObj","poupMov","poupAuto","recorr","extras","creditos","credMov","prazos","assinaturas"];
+const COLS = ["tarefas","eventos","gastos","fixos","refeicoes","agua","treinos","sessoes","inbox","turnos","saude","poupObj","poupMov","poupAuto","recorr","extras","creditos","credMov","prazos","assinaturas","receitas"];
 const DOW = ["Domingo","Segunda","Terça","Quarta","Quinta","Sexta","Sábado"];
 const DOW3 = ["Dom","Seg","Ter","Qua","Qui","Sex","Sáb"];
 const MESES = ["janeiro","fevereiro","março","abril","maio","junho","julho","agosto","setembro","outubro","novembro","dezembro"];
@@ -619,8 +627,8 @@ function vencOrc(k = today()){
 }
 function disponivelMes(k = today()){
   const vm = vencOrc(k); if (!vm) return null;
-  const m = ym(k), g = r2(somaGastos(gastosMes(m))), po = r2(Math.max(0, poupadoMes(m)));
-  return {liquido:vm.liquido, mesVenc:vm.mesVenc, gastos:g, poupanca:po, disp:r2(vm.liquido - g - po), venc:vm};
+  const m = ym(k), g = r2(somaGastos(gastosMes(m))), po = r2(Math.max(0, poupadoMes(m))), rec = r2(somaReceitas(receitasMes(m)));
+  return {liquido:vm.liquido, mesVenc:vm.mesVenc, receitas:rec, gastos:g, poupanca:po, disp:r2(vm.liquido + rec - g - po), venc:vm};
 }
 /* lê a app Vencimentos quando está no mesmo endereço (ex.: ricardojsilva11-art.github.io) */
 function readVencLocal(){
@@ -910,7 +918,7 @@ function previsaoMes(){
   const gastos = r2(variaveis + ritmo * (nd - d) + fixosTot);
   const poup = r2(Math.max(poupadoMes(m), live("poupAuto").filter(a => live("poupObj").some(o => o.id === a.obj)).reduce((a, x) => a + (+x.valor || 0), 0)));
   const vm = vencOrc(t);
-  const base = vm ? vm.liquido : orcTotal();
+  const base = (vm ? vm.liquido : orcTotal()) + somaReceitas(receitasMes(m));
   return {gastos, poup, base, comVenc:!!vm, fim:r2(base - gastos - (vm ? poup : 0)), cedo:d < 5 && nDias < 30, dia:d, nd, ritmo:r2(ritmo)};
 }
 function fixosProximos(dias = avisos().fixosDias){
@@ -927,7 +935,7 @@ function avisosHtml(){
   const out = [];
   alertasOrc().forEach(a => out.push(`<a class="aviso ${a.pct >= 1 ? "red" : ""}" href="#gastos">${ic("alert", 16)}<span><b>${esc(a.cat)}</b> ${a.gasto > a.orc + .005 ? `passou o orçamento em ${eur(a.gasto - a.orc)}` : a.pct >= 1 ? "chegou ao limite do orçamento" : `já vai em ${Math.round(a.pct * 100)} % do orçamento (faltam ${eur(a.orc - a.gasto)})`}</span></a>`));
   fixosProximos().forEach(x => out.push(`<a class="aviso" href="#gastos">${ic("bell", 16)}<span><b>${esc(x.f.desc)}</b> ${eur(x.f.valor)} · ${x.em === 0 ? "hoje" : x.em === 1 ? "amanhã" : `daqui a ${x.em} dias`}</span></a>`));
-  const mais = avisosMaisHtml();
+  const mais = avisosMaisHtml() + avisosFinHtml();
   return out.length || mais ? `<section class="avisos" aria-label="Avisos">${out.join("")}${mais}</section>` : "";
 }
 
@@ -1231,7 +1239,7 @@ function folhasExcel(){
       sets.forEach((v, j) => { if (v == null || v === "") return; tr.push([{d:s.data}, p.nome, e.n, j + 1, pnum(reps[j]) || reps[j] || "", +v, s.feito ? "Sim" : ""]); });
     });
   });
-  return [{nome:"Gastos", rows:g, widths:[12, 32, 18, 12, 14]}, {nome:"Gastos por mês", rows:gm, widths:[10, 20, 12, 12]}, {nome:"Treinos", rows:tr, widths:[12, 24, 26, 7, 11, 8, 11]}, credFolha()].filter(Boolean);
+  return [{nome:"Gastos", rows:g, widths:[12, 32, 18, 12, 14]}, {nome:"Gastos por mês", rows:gm, widths:[10, 20, 12, 12]}, {nome:"Treinos", rows:tr, widths:[12, 24, 26, 7, 11, 8, 11]}, receitasFolha(), credFolha()].filter(Boolean);
 }
 function exportarExcel(){
   const blob = xlsxBlob(folhasExcel());
@@ -1338,6 +1346,7 @@ function aiCard(sec, sub, tipos){
 function itemTitle(it){
   switch (it.tipo){
     case "gasto": return `${it.desc || "Gasto"} · ${eur(it.valor)}`;
+    case "receita": return `Receita: ${it.desc || "entrada de dinheiro"} · +${eur(it.valor)}`;
     case "tarefa": return it.t || "Tarefa";
     case "evento": return it.t || "Compromisso";
     case "refeicao": return `${it.desc || it.tipo_ref || "Refeição"} · ${Math.round(+it.kcal || 0)} kcal`;
@@ -1350,6 +1359,7 @@ function itemTitle(it){
 function itemSub(it){
   switch (it.tipo){
     case "gasto": return [it.data && relDate(it.data), it.cat].filter(Boolean).join(" · ");
+    case "receita": return [it.data && relDate(it.data), it.cat].filter(Boolean).join(" · ");
     case "tarefa": return [it.data ? relDate(it.data) : "Sem data", it.hora, it.prio && it.prio !== "media" ? "prioridade " + it.prio : ""].filter(Boolean).join(" · ");
     case "evento": return [it.data && relDate(it.data), it.hora].filter(Boolean).join(" · ");
     case "refeicao": return [it.tipo_ref, `P ${Math.round(+it.p || 0)} g · H ${Math.round(+it.h || 0)} g · G ${Math.round(+it.g || 0)} g`].filter(Boolean).join(" · ");
@@ -1511,6 +1521,7 @@ function vHoje(){
       <div class="big">${eur(gDia)}</div>
       <div class="spark" role="img" aria-label="Gastos dos 7 dias até este dia">${days7.map((v, i) => `<i class="${i === 6 ? "on" : ""}" style="height:${Math.max(4, v / max7 * 100)}%" title="${eur(v)}"></i>`).join("")}</div>
       <span class="small muted">${eur(gMes)} em ${MESES[pdk(k).getMonth()]}</span>
+      ${isT ? porDiaHtml(true) : ""}
     </div>
     <div class="card inv">
       <div class="card-head"><h2>Treino${trs[0] ? " · " + esc(trs[0].hora || S.cfg.treinoHora) : ""}</h2>${s === "N" ? '<span class="chip c-N">Noite</span>' : ""}</div>
@@ -1864,6 +1875,7 @@ function vGastos(){
       <button class="iconbtn" type="button" data-a="gm" data-v="-1" aria-label="Mês anterior">${ic("left")}</button>
       <b style="min-width:140px;text-align:center">${MESES[Mo - 1][0].toUpperCase() + MESES[Mo - 1].slice(1)} ${Y}</b>
       <button class="iconbtn" type="button" data-a="gm" data-v="1" aria-label="Mês seguinte">${ic("right")}</button>
+      <button class="btn ghost" type="button" data-a="add-receita">+ Receita</button>
       <button class="btn" type="button" data-a="add-gasto">+ Gasto</button></div></div>
   ${(() => { const d = disponivelMes(cur ? t : `${m}-${pad(nd)}`);
     if (!d) return `<section class="card" style="flex-direction:row;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:12px"><div><h2>Quanto tens para gastar</h2><span class="small muted">Liga a app Vencimentos para a app saber o teu vencimento líquido e mostrar quanto te resta até ao fim do mês.</span></div><button class="btn" type="button" data-a="venc-import">Ligar a app Vencimentos</button></section>`;
@@ -1871,11 +1883,12 @@ function vGastos(){
     return `<section class="card ${neg ? "" : "acc"}" style="gap:8px">
       <div class="eyebrow">${cur ? "Este mês" : MESES[Mo - 1]}</div>
       <div class="mid" style="font-size:30px">${neg ? `Já gastaste mais ${eur0(-d.disp)} do que o vencimento` : `Tens ${eur(d.disp)} para gastar até ao fim do mês`}</div>
-      <div class="small" style="font-weight:600">Vencimento de ${MESES[+d.mesVenc.slice(5) - 1]}${d.mesVenc !== m ? ` (recebido no fim de ${MESES[+d.mesVenc.slice(5) - 1]})` : ""} ${eur(d.liquido)} − gastos ${eur(d.gastos)}${d.poupanca ? ` − poupança ${eur(d.poupanca)}` : ""}${cur && left > 0 && !neg ? ` · cerca de ${eur(d.disp / left)} por dia` : ""}</div>
+      <div class="small" style="font-weight:600">Vencimento de ${MESES[+d.mesVenc.slice(5) - 1]}${d.mesVenc !== m ? ` (recebido no fim de ${MESES[+d.mesVenc.slice(5) - 1]})` : ""} ${eur(d.liquido)} ${d.receitas ? ` + receitas ${eur(d.receitas)}` : ""} − gastos ${eur(d.gastos)}${d.poupanca ? ` − poupança ${eur(d.poupanca)}` : ""}</div>
+      ${cur && !neg ? porDiaHtml() : ""}
       ${cur ? (() => { const pv = previsaoMes(); return `<div class="small" style="font-weight:800;border-top:1px solid rgba(0,0,0,.12);padding-top:8px">Ao ritmo atual vais acabar o mês com ${pv.fim >= 0 ? eur(pv.fim) : "menos " + eur(-pv.fim)}.<span style="font-weight:600"> Previsão de gastos: ${eur(pv.gastos)}${pv.poup ? ` · poupança ${eur(pv.poup)}` : ""}${pv.cedo ? " (ainda é cedo no mês, a previsão vai acertando)" : ""}.</span></div>`; })() : ""}
       <div class="xs" style="opacity:.75">Valor calculado com as regras e tabelas de IRS da app Vencimentos${temAjustes() ? ", com as trocas de turno e horas extra registadas no Horário" : ""}.</div>
     </section>`; })()}
-  ${cur && !vencOrc(t) ? (() => { const pv = previsaoMes(); return orcTotal() ? `<section class="card" style="gap:6px"><div class="eyebrow">Previsão</div><div class="mid">Ao ritmo atual vais acabar o mês com ${pv.fim >= 0 ? eur(pv.fim) : "menos " + eur(-pv.fim)} do orçamento.</div><span class="small muted">Previsão de gastos: ${eur(pv.gastos)} de ${eur0(orcTotal())}.</span></section>` : ""; })() : ""}
+  ${cur && !vencOrc(t) ? (() => { const pv = previsaoMes(); return orcTotal() ? `<section class="card" style="gap:6px"><div class="eyebrow">Previsão</div><div class="mid">Ao ritmo atual vais acabar o mês com ${pv.fim >= 0 ? eur(pv.fim) : "menos " + eur(-pv.fim)} do orçamento.</div><span class="small muted">Previsão de gastos: ${eur(pv.gastos)} de ${eur0(orcTotal())}.</span>${porDiaHtml()}</section>` : ""; })() : ""}
   ${cur ? avisosHtml() : ""}
   <div class="kpis">
     <div class="kpi inv"><div class="l">Gasto no mês</div><div class="v">${eur(tot)}</div><div class="xs">${orc ? `de ${eur0(orc)} de orçamento` : "sem orçamento definido"}</div></div>
@@ -1891,6 +1904,7 @@ function vGastos(){
         <div class="catrow">${catList.map((c, i) => { const v = byCat[c] || 0, b = +S.cfg.orc[c] || 0, p = b ? v / b : 0; return `<span style="font-weight:700">${esc(c)}</span><div class="bar"><i style="width:${Math.min(100, p * 100).toFixed(0)}%;background:${p >= 1 ? "var(--red)" : colors[i % colors.length]}"></i></div><span style="text-align:right"><b>${eur(v)}</b>${b ? ` / ${eur0(b)}` : ""}</span>`; }).join("")}</div>
         ${warn.length ? `<p class="small" style="margin:0;color:var(--red);font-weight:700">${warn.map(c => { const r = S.cfg.orc[c] - (byCat[c] || 0); return r >= 0 ? `${esc(c)} quase no limite: faltam ${eur(r)}.` : `${esc(c)} passou o limite em ${eur(-r)}.`; }).join(" ")}</p>` : ""}
       </section>
+      ${comparacaoCard(m)}
       <section class="card" style="gap:0">
         <h2 style="margin-bottom:6px">Movimentos</h2>
         ${Object.keys(groups).map(d => `<h3 class="group-title">${relDate(d)} · ${eur(somaGastos(groups[d]))}</h3><div class="list">${groups[d].map(g => `<div class="item"><div class="grow"><div class="t">${esc(g.desc || g.cat)}</div><div class="s">${esc(g.cat || "")}${g.origem && g.origem !== "manual" ? " · " + esc({ia:"lido pela IA", fixo:"despesa fixa", credito:"prestação de crédito", applepay:"Apple Pay", auto:"automático"}[g.origem] || g.origem) : ""}</div></div>
@@ -1898,6 +1912,7 @@ function vGastos(){
       </section>
     </div>
     <div class="side-col">
+      ${receitasCard(m)}
       ${aiCard("gastos", "Arrasta o extrato do banco: cada movimento entra na categoria certa e os repetidos ficam de fora", "Extrato PDF, CSV ou Excel, faturas, talões")}
       ${poupCard()}
       ${subsCard()}
@@ -2471,6 +2486,7 @@ async function aiFiles(files, sec){
 function applyItem(it, origem = "ia"){
   const t = today(); let r = null;
   switch (it.tipo){
+    case "receita": { const v = Math.abs(pnum(it.valor)); if (v) r = ["receitas", put("receitas", {data:it.data || t, valor:v, desc:String(it.desc || "").trim(), cat:RECEITA_CATS().includes(it.cat) ? it.cat : "Outros", origem})]; break; }
     case "gasto": r = ["gastos", put("gastos", {data:it.data || t, valor:pnum(it.valor), desc:String(it.desc || "").trim(), cat:cats().includes(it.cat) ? it.cat : guessCat(it.desc), origem})]; break;
     case "tarefa": if (["diaria","semanal","mensal","anual"].includes(it.repete)){ const sr = criarSerie({t:it.t || "Tarefa", data:it.data || "", hora:it.hora || "", prio:["alta","media","baixa"].includes(it.prio) ? it.prio : "media", tag:it.tag || ""}, {freq:it.repete, dias:(it.dias || []).map(Number), dia:+it.dia || 0}); r = ["recorr", sr]; break; }
       r = ["tarefas", put("tarefas", {t:it.t || "Tarefa", data:it.data || "", hora:it.hora || "", prio:["alta","media","baixa"].includes(it.prio) ? it.prio : "media", tag:it.tag || "", feito:false, origem:"ia"})]; break;
@@ -3064,6 +3080,122 @@ Object.assign(A, {
 });
 
 /* ============================================================
+   dia. — GASTOS E RECEITAS: receitas, comparação entre meses,
+   quanto podes gastar por dia
+   ============================================================ */
+function RECEITA_CATS(){ return ["Reembolso","Venda","Trabalho extra","Presente","Juros e dividendos","Outros"]; }
+function receitasMes(m){ return live("receitas").filter(r => ym(r.data) === m); }
+function somaReceitas(arr){ return arr.reduce((a, r) => a + (+r.valor || 0), 0); }
+function receitaParecida(it, ignorar){ const v = pnum(it.valor); return live("receitas").find(r => r.id !== ignorar && r.data === it.data && Math.abs((+r.valor || 0) - v) < .01) || null; }
+
+/* despesas que ainda vão sair este mês: fixos, prestações e poupança automática que ainda não entraram */
+function pendentesMes(){
+  const t = today(), m = ym(t), nd = diasNoMes(m), dia = k => Math.min(+k || 1, nd);
+  const fixos = live("fixos").filter(f => !S.gastos.some(g => g.id === `fx-${f.id}-${m}`) && dia(f.dia) > +t.slice(8)).reduce((a, f) => a + (+f.valor || 0), 0);
+  const prest = live("creditos").filter(c => credLancaGastos(c) && credInfo(c).div > 0 && !S.gastos.some(g => g.id === `cg-${c.id}-${m}`) && dia(c.dia) > +t.slice(8)).reduce((a, c) => a + (+c.prestacao || 0), 0);
+  const poup = live("poupAuto").filter(a => live("poupObj").some(o => o.id === a.obj) && !S.poupMov.some(x => x.id === `pa-${a.id}-${m}`) && dia(a.dia) > +t.slice(8)).reduce((a, x) => a + (+x.valor || 0), 0);
+  return {fixos:r2(fixos + prest), poup:r2(poup)};
+}
+/* quanto podes gastar por dia até ao fim do mês sem passar o dinheiro disponível (ou o orçamento) */
+function porDia(){
+  const t = today(), m = ym(t), nd = diasNoMes(m), dias = nd - +t.slice(8) + 1;
+  const d = disponivelMes(t), pend = pendentesMes();
+  const gastoHoje = somaGastos(live("gastos").filter(g => g.data === t && g.origem !== "fixo" && g.origem !== "credito"));
+  let base, fonte;
+  if (d){ base = d.disp; fonte = "venc"; }
+  else if (orcTotal()){ base = orcTotal() + somaReceitas(receitasMes(m)) - somaGastos(gastosMes(m)); fonte = "orc"; }
+  else return null;
+  /* o que já gastaste hoje volta a contar para o valor de hoje */
+  const livre = r2(base - pend.fixos - (fonte === "venc" ? pend.poup : 0) + gastoHoje);
+  return {fonte, livre, dias, dia:r2(livre / dias), hoje:r2(gastoHoje), pend, resta:r2(livre / dias - gastoHoje)};
+}
+function porDiaHtml(compacto){
+  const p = porDia(); if (!p) return "";
+  if (p.livre <= 0) return `<div class="small" style="font-weight:800;color:var(--red)">Não há margem para mais gastos até ao fim do mês${p.pend.fixos ? ` (ainda faltam ${eur(p.pend.fixos)} de fixos e prestações)` : ""}.</div>`;
+  if (compacto) return `<div class="small"><b>${eur(p.dia)}</b> por dia até ao fim do mês${p.hoje ? ` · hoje já ${p.resta >= 0 ? `podes mais ${eur(p.resta)}` : `passaste ${eur(-p.resta)}`}` : ""}</div>`;
+  return `<div class="pordia"><div><div class="eyebrow">Podes gastar por dia</div><div class="v">${eur(p.dia)}</div></div>
+    <div class="small" style="font-weight:600">até ao fim do mês (${p.dias} dia${p.dias === 1 ? "" : "s"})${p.pend.fixos ? `, já com ${eur(p.pend.fixos)} de fixos e prestações por pagar` : ""}${p.fonte === "venc" && p.pend.poup ? ` e ${eur(p.pend.poup)} de poupança automática` : ""}.${p.hoje ? `<br>Hoje gastaste ${eur(p.hoje)}: ${p.resta >= 0 ? `ainda podes ${eur(p.resta)}` : `passaste ${eur(-p.resta)} do valor de hoje`}.` : ""}</div></div>`;
+}
+
+/* ---------- comparação com meses anteriores ---------- */
+function mesAnt(m, n){ const d = pdk(`${m}-01`); d.setMonth(d.getMonth() - n); return ym(dk(d)); }
+/* gasto até ao mesmo dia do mês, por categoria */
+function porCatAteDia(m, dia){ const by = {}; gastosMes(m).filter(g => +g.data.slice(8) <= dia).forEach(g => by[g.cat || "Outros"] = (by[g.cat || "Outros"] || 0) + (+g.valor || 0)); return by; }
+/* categorias acima do habitual: este mês até hoje vs. média dos 3 meses anteriores até ao mesmo dia */
+function acimaHabitual(m = ym(today())){
+  const cur = m === ym(today()), dia = cur ? +today().slice(8) : diasNoMes(m);
+  const atual = porCatAteDia(m, dia), ant = [1, 2, 3].map(n => porCatAteDia(mesAnt(m, n), dia));
+  const comDados = [1, 2, 3].filter(n => gastosMes(mesAnt(m, n)).length).length;
+  if (!comDados) return [];
+  return Object.keys(atual).filter(c => c !== "Créditos").map(c => {
+    const med = ant.reduce((a, b) => a + (b[c] || 0), 0) / comDados, v = atual[c];
+    return {cat:c, v:r2(v), med:r2(med), dif:r2(v - med), pct:med ? (v - med) / med : null};
+  }).filter(x => x.med > 0 ? x.pct >= .3 && x.dif >= 25 : x.v >= 60).sort((a, b) => b.dif - a.dif);
+}
+function comparacaoCard(m){
+  let meses = [5, 4, 3, 2, 1, 0].map(n => mesAnt(m, n)); const cur = m === ym(today());
+  /* não mostra meses antes do primeiro registo */
+  while (meses.length > 2 && !gastosMes(meses[0]).length) meses.shift();
+  const tot = meses.map(x => r2(somaGastos(gastosMes(x)))), rec = meses.map(x => r2(somaReceitas(receitasMes(x))));
+  if (tot.filter(v => v > 0).length < 2) return `<section class="card"><h2>Comparação com meses anteriores</h2><div class="empty">Aparece quando tiveres gastos de pelo menos dois meses.</div></section>`;
+  const prev = cur ? previsaoMes().gastos : tot[tot.length - 1], mx = Math.max(1, ...tot, prev);
+  const dia = cur ? +today().slice(8) : diasNoMes(m), atual = porCatAteDia(m, dia), anterior = porCatAteDia(mesAnt(m, 1), dia);
+  const cats2 = [...new Set([...Object.keys(atual), ...Object.keys(anterior)])].sort((a, b) => (atual[b] || 0) - (atual[a] || 0)).slice(0, 7);
+  const acima = acimaHabitual(m);
+  return `<section class="card" aria-label="Comparação com meses anteriores">
+    <div class="card-head"><h2>Comparação com meses anteriores</h2><span class="xs muted">gastos por mês</span></div>
+    <div class="chart" style="height:150px" role="img" aria-label="Gastos dos últimos 6 meses">${meses.map((x, i) => {
+      const last = i === meses.length - 1;
+      return `<div class="col"><span class="small" style="font-weight:800">${eur0(tot[i])}</span>${last && cur && prev > tot[i] ? `<i class="proj" style="height:${Math.max(3, (prev - tot[i]) / mx * 100)}%" title="Previsão até ao fim do mês: ${eur(prev)}"></i>` : ""}<i class="${last ? "on" : ""}" style="height:${Math.max(3, tot[i] / mx * 100)}%" title="${eur(tot[i])}${rec[i] ? " · receitas " + eur(rec[i]) : ""}"></i><span>${MESES[+x.slice(5) - 1].slice(0, 3)}${last && cur ? " (até hoje)" : ""}</span></div>`; }).join("")}</div>
+    ${cur ? `<div class="xs muted">A tracejado: previsão até ao fim do mês (${eur(prev)}).</div>` : ""}
+    <div class="small" style="font-weight:800;margin-top:4px">Por categoria, até ao dia ${dia}: ${MESES[+m.slice(5) - 1]} vs. ${MESES[+mesAnt(m, 1).slice(5) - 1]}</div>
+    <table class="cmp"><tbody>${cats2.map(c => { const a = atual[c] || 0, b = anterior[c] || 0, d = a - b;
+      return `<tr><td>${esc(c)}</td><td class="n">${eur(a)}</td><td class="n muted">${eur(b)}</td><td class="n" style="color:${d > 0.5 ? "var(--red)" : d < -0.5 ? "var(--green)" : "var(--muted)"};font-weight:800">${Math.abs(d) < .5 ? "=" : (d > 0 ? "+" : "−") + eur0(Math.abs(d))}</td></tr>`; }).join("")}</tbody></table>
+    ${acima.length ? `<div class="list">${acima.map(x => `<div class="item"><span style="color:var(--amber-ink)">${ic("alert", 18)}</span><div class="grow"><div class="t">${esc(x.cat)} acima do habitual</div><div class="s">${eur(x.v)} até hoje, quando o habitual até este dia é ${eur(x.med)}${x.pct != null ? ` (+${Math.round(x.pct * 100)} %)` : ""}</div></div></div>`).join("")}</div>` : ""}
+  </section>`;
+}
+
+/* ---------- receitas ---------- */
+function dlgReceita(r = {}){
+  openDlg(r.id ? "Editar receita" : "Nova receita", `<div class="fields">
+    <label class="field">Valor (€)<input name="valor" inputmode="decimal" required value="${r.valor != null ? esc(num(r.valor, 2)) : ""}" placeholder="0,00"></label>
+    <label class="field">Data<input type="date" name="data" required value="${esc(r.data || diaSel())}"></label></div>
+    <label class="field">Descrição<input name="desc" value="${esc(r.desc || "")}" placeholder="Ex.: reembolso do seguro, venda no OLX"></label>
+    <label class="field">Tipo<select name="cat">${opt(RECEITA_CATS(), r.cat || "Outros")}</select></label>
+    <span class="xs muted">O vencimento já vem da app Vencimentos: aqui entram as outras entradas de dinheiro. Somam ao que tens para gastar no mês.</span>`,
+  (o, f) => {
+    const v = vNum(o.valor, "o valor", {max:1e6}), data = vData(o.data), chave = [v, data].join("|");
+    const dup = receitaParecida({valor:v, data}, r.id);
+    if (dup && f.dataset.dupOk !== chave){ f.dataset.dupOk = chave; throw new Error(`Parece repetida: já tens ${eur(dup.valor)} (${dup.desc || dup.cat}) nesse dia. Carrega outra vez em Guardar para registar na mesma.`); }
+    put("receitas", {id:r.id, valor:v, data, desc:o.desc.trim(), cat:o.cat, origem:r.origem || "manual"}); save(); render(); toast("Receita guardada.");
+  }, "Guardar", r.id ? `<button class="btn danger" type="button" data-a="del-receita" data-id="${r.id}" style="margin-right:auto">Apagar</button>` : "");
+}
+function receitasCard(m){
+  const rs = receitasMes(m).sort((a, b) => b.data.localeCompare(a.data)), tot = somaReceitas(rs);
+  return `<section class="card" aria-label="Receitas">
+    <div class="card-head"><h2>Receitas</h2><button class="btn sm" type="button" data-a="add-receita">+ Receita</button></div>
+    ${rs.length ? `<div class="mid" style="color:var(--green)">+${eur(tot)}</div>` : ""}
+    <div class="list">${rs.map(r => `<div class="item"><div class="grow"><div class="t">${esc(r.desc || r.cat)}</div><div class="s">${relDate(r.data)} · ${esc(r.cat)}</div></div><span class="amount" style="color:var(--green)">+${eur(r.valor)}</span><button class="linkbtn" type="button" data-a="edit-receita" data-id="${r.id}">Editar</button></div>`).join("") || '<div class="empty">Reembolsos, vendas, trabalhos extra… somam ao que tens para gastar.</div>'}</div>
+  </section>`;
+}
+function receitasFolha(){
+  const rs = live("receitas").slice().sort((a, b) => a.data.localeCompare(b.data));
+  if (!rs.length) return null;
+  return {nome:"Receitas", rows:[["Data","Descrição","Tipo","Valor"]].concat(rs.map(r => [{d:r.data}, r.desc || "", r.cat || "", {e:+r.valor || 0}])), widths:[12, 32, 18, 12]};
+}
+/* aviso em Hoje: categorias acima do habitual */
+function avisosFinHtml(){
+  const jaAvisado = new Set(alertasOrc().map(a => a.cat));
+  return acimaHabitual().filter(x => !jaAvisado.has(x.cat)).slice(0, 2).map(x => `<a class="aviso" href="#gastos">${ic("alert", 16)}<span><b>${esc(x.cat)}</b> acima do habitual: ${eur(x.v)} até hoje (habitual ${eur(x.med)})</span></a>`).join("");
+}
+
+Object.assign(A, {
+  "add-receita": () => dlgReceita(),
+  "edit-receita": el => dlgReceita(byId("receitas", el.dataset.id)),
+  "del-receita": el => { $("#dlg").close("cancel"); remove("receitas", el.dataset.id); save(); render(); toast("Receita apagada."); }
+});
+
+/* ============================================================
    dia. — comando por voz e ligação Google
    ============================================================ */
 const GSCRIPT = "/* ============================================================\n   dia. \u2014 liga\u00e7\u00e3o ao Gmail e ao Google Calend\u00e1rio\n   Corre na tua conta Google (script.google.com). N\u00e3o precisa de\n   projeto na Google Cloud. De 15 em 15 minutos:\n   1. l\u00ea o teu calend\u00e1rio e envia os compromissos para a app;\n   2. escreve os teus turnos e treinos num calend\u00e1rio \u00abdia.\u00bb;\n   3. procura emails com faturas, avisos ou escalas e envia-os\n      para a IA da app (aparecem em \u00abEntrou sozinho\u00bb).\n   ============================================================ */\nconst CONFIG = {\n  URL: \"__URL__\",                 // endere\u00e7o do servidor (Cloudflare Worker)\n  CODIGO: \"__CODIGO__\",           // o teu c\u00f3digo pessoal da app\n  CALENDARIO_LER: \"principal\",    // \"principal\" ou o ID de outro calend\u00e1rio\n  CALENDARIO_TURNOS: \"dia. \u00b7 turnos e treinos\",\n  DIAS: 35,                       // quantos dias para a frente\n  LER_GMAIL: true,\n  GMAIL_PESQUISA: 'newer_than:3d -label:dia-lido (label:dia OR (has:attachment (fatura OR factura OR recibo OR escala OR \"aviso de pagamento\" OR \"nota de cobran\u00e7a\" OR \"documento de cobran\u00e7a\")))',\n  GMAIL_MAX: 8\n};\n\n/* Corre esta fun\u00e7\u00e3o UMA vez: pede autoriza\u00e7\u00e3o e liga a sincroniza\u00e7\u00e3o autom\u00e1tica. */\nfunction instalar(){\n  ScriptApp.getProjectTriggers().filter(t => t.getHandlerFunction() === \"sincronizar\").forEach(t => ScriptApp.deleteTrigger(t));\n  ScriptApp.newTrigger(\"sincronizar\").timeBased().everyMinutes(15).create();\n  sincronizar();\n  Logger.log(\"Feito. A liga\u00e7\u00e3o corre sozinha de 15 em 15 minutos.\");\n}\n\nfunction sincronizar(){\n  const erros = [];\n  try{ lerCalendario(); }catch(e){ erros.push(\"Calend\u00e1rio: \" + e.message); }\n  try{ escreverTurnos(); }catch(e){ erros.push(\"Turnos: \" + e.message); }\n  if (CONFIG.LER_GMAIL){ try{ lerGmail(); }catch(e){ erros.push(\"Gmail: \" + e.message); } }\n  if (erros.length) throw new Error(erros.join(\" | \"));\n}\n\n/* ---------- utilit\u00e1rios ---------- */\nfunction enviar(caminho, corpo){\n  corpo.code = CONFIG.CODIGO;\n  const r = UrlFetchApp.fetch(CONFIG.URL.replace(/\\/+$/, \"\") + caminho, {method:\"post\", contentType:\"application/json\", payload:JSON.stringify(corpo), muteHttpExceptions:true});\n  let j = {}; try{ j = JSON.parse(r.getContentText() || \"{}\"); }catch(e){}\n  if (r.getResponseCode() >= 300) throw new Error(j.error || (\"erro \" + r.getResponseCode()));\n  return j;\n}\nconst TZ = () => Session.getScriptTimeZone();\nconst dia = d => Utilities.formatDate(d, TZ(), \"yyyy-MM-dd\");\nconst hora = d => Utilities.formatDate(d, TZ(), \"HH:mm\");\nfunction paraData(s){ const m = /^(\\d{4})-(\\d{2})-(\\d{2})T(\\d{2}):(\\d{2})/.exec(s); return new Date(+m[1], +m[2] - 1, +m[3], +m[4], +m[5]); }\n\n/* ---------- 1. calend\u00e1rio \u2192 app ---------- */\nfunction lerCalendario(){\n  const cal = CONFIG.CALENDARIO_LER === \"principal\" ? CalendarApp.getDefaultCalendar() : CalendarApp.getCalendarById(CONFIG.CALENDARIO_LER);\n  if (!cal) throw new Error(\"calend\u00e1rio n\u00e3o encontrado\");\n  const ini = new Date(); ini.setHours(0, 0, 0, 0); ini.setDate(ini.getDate() - 1);\n  const fim = new Date(ini.getTime() + (CONFIG.DIAS + 1) * 86400000);\n  const eventos = cal.getEvents(ini, fim).map(e => {\n    const a = e.getStartTime(), b = e.getEndTime(), todoDia = e.isAllDayEvent();\n    return {gid:e.getId() + \"|\" + a.getTime(), t:e.getTitle(), data:dia(a), hora:todoDia ? \"\" : hora(a), dur:todoDia ? 60 : Math.round((b - a) / 60000), local:e.getLocation() || \"\"};\n  });\n  enviar(\"/api/google\", {tipo:\"agenda\", ini:dia(ini), fim:dia(fim), eventos});\n}\n\n/* ---------- 2. turnos e treinos da app \u2192 calend\u00e1rio \u00abdia.\u00bb ---------- */\nfunction escreverTurnos(){\n  const j = enviar(\"/api/google\", {tipo:\"turnos\"});\n  const itens = j.itens || [];\n  let cal = CalendarApp.getCalendarsByName(CONFIG.CALENDARIO_TURNOS)[0];\n  if (!cal) cal = CalendarApp.createCalendar(CONFIG.CALENDARIO_TURNOS, {color:CalendarApp.Color.YELLOW});\n  const ini = new Date(); ini.setHours(0, 0, 0, 0);\n  const fim = new Date(ini.getTime() + (CONFIG.DIAS + 2) * 86400000);\n  const existentes = {};\n  cal.getEvents(ini, fim).forEach(e => { const id = e.getTag(\"dia-id\"); if (id) existentes[id] = e; else e.deleteEvent(); });\n  const queremos = {};\n  itens.forEach(it => {\n    queremos[it.id] = true;\n    const a = paraData(it.ini), b = paraData(it.fim), e = existentes[it.id];\n    if (e && e.getTitle() === it.t && e.getStartTime().getTime() === a.getTime() && e.getEndTime().getTime() === b.getTime()) return;\n    if (e) e.deleteEvent();\n    const n = cal.createEvent(it.t, a, b);\n    n.setTag(\"dia-id\", it.id);\n  });\n  Object.keys(existentes).forEach(id => { if (!queremos[id]) existentes[id].deleteEvent(); });\n}\n\n/* ---------- 3. Gmail \u2192 IA da app ---------- */\nfunction lerGmail(){\n  const lido = GmailApp.getUserLabelByName(\"dia-lido\") || GmailApp.createLabel(\"dia-lido\");\n  GmailApp.search(CONFIG.GMAIL_PESQUISA, 0, CONFIG.GMAIL_MAX).forEach(th => {\n    const m = th.getMessages().pop(), assunto = m.getSubject(), de = m.getFrom();\n    const anexos = m.getAttachments({includeInlineImages:false}).filter(a => /pdf|image\\//.test(a.getContentType()) && a.getSize() < 8e6).slice(0, 2);\n    if (anexos.length){\n      anexos.forEach(a => enviar(\"/api/google\", {tipo:\"email\", assunto, de, ficheiro:{nome:a.getName(), mime:a.getContentType().indexOf(\"pdf\") >= 0 ? \"application/pdf\" : a.getContentType(), b64:Utilities.base64Encode(a.getBytes())}}));\n    } else {\n      enviar(\"/api/google\", {tipo:\"email\", assunto, de, ficheiro:{nome:assunto, mime:\"text/plain\", texto:\"De: \" + de + \"\\nAssunto: \" + assunto + \"\\nData: \" + m.getDate() + \"\\n\\n\" + m.getPlainBody().slice(0, 20000)}});\n    }\n    th.addLabel(lido);\n  });\n}\n";
@@ -3167,7 +3299,9 @@ async function executarComando(texto){
   /* a comida saiu da app: a voz já não regista refeições nem água */
   if (SEM_COMIDA.test(texto)){ V.estado = ""; V.resposta = "A comida já não faz parte da app, por isso não registei nada."; vozUI(); falar(V.resposta); return; }
   let out = null;
-  if (syncOn()){
+  /* «recebi …» é tratado aqui (receitas) */
+  if (/^\s*recebi\b/i.test(texto)) out = comandoLocal(texto);
+  if (!out && syncOn()){
     try{ out = await api("/api/comando", {texto, ctx:ctxComando()}); }
     catch(e){ if (!/IA ainda não está ligada|501/.test(e.message)) V.erro = "A IA não respondeu (" + e.message + "). Usei os comandos simples."; }
   }
@@ -3221,7 +3355,7 @@ function aplicarAcoes(acoes){
       V.undo.push(() => { const nx = (byId("tarefas", a.id) || {}).gerou; if (nx) remove("tarefas", nx); put("tarefas", {id:a.id, feito:false, gerou:null}); });
       return;
     }
-    if (a.tipo === "gasto" || a.tipo === "poupanca"){ V.pend.push(a); return; }
+    if (a.tipo === "gasto" || a.tipo === "poupanca" || a.tipo === "receita"){ V.pend.push(a); return; }
     const r = applyItem(a, a.tipo === "gasto" ? "voz" : "ia");
     if (r){ V.feitos.push(itemTitle(a) + (itemSub(a) ? " · " + itemSub(a) : "")); V.undo.push(() => remove(r[0], r[1])); }
   });
@@ -3245,6 +3379,11 @@ function comandoLocal(txt){
   if ((m = /\b(?:gastei|paguei|gasto de|despesa de)\s+([\d.,]+)\s*(?:€|euros?)?(?:\s*e\s*(\d+)\s*c[eê]ntimos?)?\s*(?:em|no|na|nos|nas|de|do|da|com|para|ao|à)?\s*(.*)$/i.exec(t))){
     const valor = r2(pnum(m[1]) + (m[2] ? +m[2] / 100 : 0)), desc = cap((m[3] || "Gasto").trim()), cat = guessCat(desc);
     return {resposta:`Registei ${eur(valor)} em ${cat}.`, acoes:[{tipo:"gasto", valor, desc, cat, data:today()}]};
+  }
+  if ((m = /^recebi\s+([\d.,]+)\s*(?:€|euros?)?\s*(?:de|do|da|dos|das|com|pelo|pela|em)?\s*(.*)$/i.exec(t))){
+    const valor = r2(pnum(m[1])), desc = cap((m[2] || "").trim()), cat = /reembols|devolu/i.test(desc) ? "Reembolso" : /vend/i.test(desc) ? "Venda" : /extra|biscate|trabalho/i.test(desc) ? "Trabalho extra" : /prenda|presente|oferta/i.test(desc) ? "Presente" : "Outros";
+    if (!valor) return null;
+    return {resposta:`Receita de ${eur(valor)}.`, acoes:[{tipo:"receita", valor, desc:desc || "Receita", cat, data:today()}]};
   }
   if ((m = /\b(poupei|guardei|pus|meti|depositei|retirei|tirei|levantei)\s+([\d.,]+)\s*(?:€|euros?)?\s*(?:na|no|para a|para o|para|da|do)?\s*(?:poupança|mealheiro|objetivo)?\s*(?:d[aoe]s?|para)?\s*(.*)$/i.exec(t)) && (/poupan|mealheiro|objetivo|poupei|guardei|depositei/i.test(t))){
     const sinal = /retirei|tirei|levantei/i.test(m[1]) ? -1 : 1, v = pnum(m[2]), o = objPorNome(m[3]);
