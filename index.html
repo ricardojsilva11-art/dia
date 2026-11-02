@@ -394,6 +394,19 @@ a.linkbtn{text-decoration:none}
 table.cmp{width:100%; border-collapse:collapse; font-size:14px}
 table.cmp td{padding:7px 4px; border-bottom:1px solid var(--line)}
 table.cmp td.n{text-align:right; white-space:nowrap; font-variant-numeric:tabular-nums}
+.credrow .v.sm{font-size:16px; white-space:normal; line-height:1.2}
+table.cmp th{font-size:12px; color:var(--muted); font-weight:700; text-align:left; padding:6px 4px; border-bottom:1px solid var(--line)}
+table.cmp th.n{text-align:right}
+table.cmp tr.sub td{padding-top:0; border-bottom:1px solid var(--line)}
+table.cmp tr:has(+ tr.sub) td{border-bottom:0}
+table.hist{font-size:13px} table.hist td{padding:6px 4px}
+.aslist{display:flex; flex-direction:column}
+.asrow{display:grid; grid-template-columns:1.3fr 1fr 1fr 1fr; gap:4px 12px; padding:12px 0; border-bottom:1px solid var(--line); align-items:start}
+.asrow > div{display:flex; flex-direction:column; min-width:0}
+.asrow .l{font-size:12px; color:var(--muted); font-weight:700}
+.asrow b{font-size:16px; font-variant-numeric:tabular-nums}
+.asrow .asord{grid-column:1 / -1}
+@media (max-width:640px){ .asrow{grid-template-columns:repeat(3,minmax(0,1fr))} .asrow .asname{grid-column:1 / -1} }
 
 </style>
 </head>
@@ -422,7 +435,7 @@ table.cmp td.n{text-align:right; white-space:nowrap; font-variant-numeric:tabula
 /* ============================================================
    dia. — núcleo: dados, datas, sincronização, horário
    ============================================================ */
-const APP_VERSION = "3.7 · 02/11/2026";
+const APP_VERSION = "3.8 · 02/11/2026";
 const KEY = "dia-app-v1";
 const VENC_KEY = "vencimento-app-v1";
 const COLS = ["tarefas","eventos","gastos","fixos","refeicoes","agua","treinos","sessoes","inbox","turnos","saude","poupObj","poupMov","poupAuto","recorr","extras","creditos","credMov","prazos","assinaturas","receitas"];
@@ -2213,7 +2226,7 @@ function evoChart(evo, maxDe){
 let dlgCb = null, dlgGen = 0, dlgFeito = false;
 function openDlg(title, inner, onOk, okLabel = "Guardar", extra = "", cancelLabel = "Cancelar"){
   const f = $("#dlgForm");
-  delete f.dataset.tipoMan; delete f.dataset.sim;
+  delete f.dataset.tipoMan; delete f.dataset.sim; delete f.dataset.pag;
   dlgGen++; dlgFeito = false;
   f.innerHTML = `<h2>${esc(title)}</h2>${inner}<div class="dlg-err" role="alert" hidden></div><div class="dlg-actions">${extra}<button class="btn ghost" value="cancel" formnovalidate>${esc(cancelLabel)}</button>${onOk ? `<button class="btn" value="ok">${esc(okLabel)}</button>` : ""}</div>`;
   dlgCb = onOk;
@@ -2640,6 +2653,7 @@ document.addEventListener("change", e => {
   else if (c === "aviso"){ setCfg({avisos:Object.assign(avisos(), {[el.dataset.k]:Math.max(0, Math.round(pnum(el.value)))})}); save(); render(); }
   else if (c === "aviso-bool"){ setCfg({avisos:Object.assign(avisos(), {[el.dataset.k]:el.checked})}); save(); }
   else if (c === "aviso-hora"){ if (el.value){ setCfg({avisos:Object.assign(avisos(), {[el.dataset.k || "resumoHora"]:el.value})}); save(); } }
+  else if (c === "cred-extra"){ UI.credExtra = Math.max(0, pnum(el.value)); render(); }
   else if (c === "cfg-num"){ setCfg({[el.dataset.k]:pnum(el.value)}); save(); render(); }
   else if (c === "hdia-pick"){ if (el.value) setDia(el.value); }
   else if (c === "treino-sel"){ UI.treinoSel[t] = el.value; render(); }
@@ -2718,12 +2732,13 @@ function credInfo(c){
   const total = +c.total || 0, ab = Math.min(total, credAbatido(c)), div = r2(Math.max(0, total - ab));
   const r = (+c.taxa || 0) / 1200, P = +c.prestacao || 0;
   /* meses que faltam (com juros se a TAN estiver preenchida) */
-  let meses = null;
-  if (div <= 0) meses = 0;
-  else if (P > 0){ if (r > 0){ meses = P > div * r ? Math.ceil(-Math.log(1 - r * div / P) / Math.log(1 + r)) : null; } else meses = Math.ceil(div / P); }
+  /* o mesmo cálculo mês a mês do simulador: prazo e juros até ao fim ficam sempre coerentes */
+  let meses = null, jurosRest = null;
+  if (div <= 0){ meses = 0; jurosRest = 0; }
+  else if (P > 0){ const sm = simular(div, r, P); if (sm){ meses = sm.n; jurosRest = sm.juros; } }
   let fim = null;
   if (meses != null){ const d = pdk(today()); d.setDate(1); d.setMonth(d.getMonth() + meses); fim = d; }
-  return {total, ab, div, pct:total ? ab / total : 0, meses, fim, juros:r2(div * r)};
+  return {total, ab, div, pct:total ? ab / total : 0, meses, fim, juros:r2(div * r), jurosRest};
 }
 /* prestações automáticas: em cada mês, no dia indicado, abate o capital da prestação */
 function applyCredAuto(){
@@ -2738,7 +2753,7 @@ function applyCredAuto(){
       if (S.credMov.some(x => x.id === id)) continue;
       const info = credInfo(c); if (info.div <= 0) break;
       const juros = r2(info.div * (+c.taxa || 0) / 1200), cap = r2(Math.min(info.div, Math.max(0, +c.prestacao - juros)));
-      put("credMov", {id, cred:c.id, data:dia, valor:cap, nota:juros ? `Prestação ${eur(c.prestacao)} (juros ${eur(juros)})` : `Prestação ${eur(c.prestacao)}`, origem:"auto"});
+      put("credMov", {id, cred:c.id, data:dia, valor:cap, juros, tipo:"prest", nota:juros ? `Prestação ${eur(c.prestacao)} (juros ${eur(juros)})` : `Prestação ${eur(c.prestacao)}`, origem:"auto"});
       ch = true;
     }
   });
@@ -2767,6 +2782,71 @@ function credFixosCard(){
   const rep = c => live("fixos").find(f => Math.abs((+f.valor || 0) - (+c.prestacao || 0)) < 1);
   return `<div class="xs muted" style="font-weight:700;margin-top:4px">Prestações dos créditos</div>
     <div class="list">${cs.sort((a, b) => (+a.dia || 1) - (+b.dia || 1)).map(c => `<div class="item"><div class="grow"><div class="t">${esc(c.nome)}</div><div class="s">Dia ${esc(c.dia || 1)} · Créditos${rep(c) ? ` · <span style="color:var(--red)">parece repetido com «${esc(rep(c).desc)}» nas despesas fixas</span>` : ""}</div></div><span class="amount">${eur(c.prestacao)}</span><a class="linkbtn" href="#creditos">Ver</a></div>`).join("")}</div>`;
+}
+
+/* histórico: tipo, capital, juros e o que ficou em dívida depois de cada movimento */
+function movTipo(m){ return m.tipo === "amort" || /amortiza/i.test(m.nota || "") ? "Amortização extraordinária" : m.origem === "acerto" ? "Acerto" : m.tipo === "prest" || m.origem === "auto" || /prestaç/i.test(m.nota || "") ? "Prestação" : "Pagamento"; }
+function movJuros(m){ if (m.juros != null) return +m.juros || 0; const x = /juros ([\d\s.]+,\d{2})/.exec(m.nota || ""); return x ? pnum(x[1].replace(/\s|\./g, "")) : null; }
+function credHistorico(c){
+  let ab = +c.abatidoIni || 0; const total = +c.total || 0;
+  return credMovs(c.id).map(m => { ab += +m.valor || 0; return {m, tipo:movTipo(m), cap:+m.valor || 0, juros:movJuros(m), div:r2(Math.max(0, total - ab))}; });
+}
+function histTabela(h){
+  return `<div class="list">${h.map(x => `<div class="item"><div class="grow"><div class="t">${esc(x.tipo)} · ${shortDate(x.m.data)}</div><div class="s">${x.juros ? `juros ${eur(x.juros)} · ` : ""}${x.m.comissao ? `comissão ${eur(x.m.comissao)} · ` : ""}fica em dívida ${eurC(x.div)}</div></div><span class="amount">${x.cap < 0 ? "−" : ""}${eur(Math.abs(x.cap))}</span><button class="x" type="button" data-a="del" data-col="credMov" data-id="${x.m.id}" aria-label="Apagar movimento de ${shortDate(x.m.data)}">${ic("x", 14)}</button></div>`).join("")}</div>`;
+}
+function dlgHistorico(c){
+  const h = credHistorico(c).reverse(), cap = h.reduce((a, x) => a + x.cap, 0), jur = h.reduce((a, x) => a + (x.juros || 0), 0);
+  openDlg(`Histórico · ${c.nome}`, `<div class="small">${h.length} movimento${h.length === 1 ? "" : "s"} · capital abatido ${eur(cap)}${jur ? ` · juros pagos ${eur(jur)}` : ""}${+c.abatidoIni ? ` · já estavam abatidos ${eur(c.abatidoIni)} quando registaste o crédito` : ""}</div>
+    ${h.length ? histTabela(h) : '<div class="empty">Ainda sem pagamentos registados.</div>'}`, null, "", "", "Fechar");
+}
+
+/* ---------- Avalanche vs. Snowball ----------
+   Todos os créditos pagam a sua prestação; o valor extra (e as prestações dos créditos que já acabaram)
+   vai para um crédito de cada vez: Avalanche → o de juro mais alto; Snowball → o de menor dívida. */
+function planoDividas(cs, extra, metodo){
+  const it = cs.map(c => { const x = credInfo(c); return {c, D:x.div, r:(+c.taxa || 0) / 1200, P:+c.prestacao || 0, fim:null}; }).filter(x => x.D > 0);
+  if (it.some(x => !(x.P > x.D * x.r) )) return {erro:"Há um crédito sem prestação ou com uma prestação que não chega para os juros."};
+  let mes = 0, juros = 0;
+  while (it.some(x => x.D > .005) && mes < 1200){
+    mes++;
+    let pool = metodo ? extra : 0;
+    it.forEach(x => {
+      if (x.D <= .005){ if (metodo) pool += x.P; return; }
+      const j = x.D * x.r; juros += j;
+      const pay = Math.min(x.P, x.D + j); x.D = x.D + j - pay;
+      if (metodo) pool += x.P - pay;
+      if (x.D <= .005){ x.D = 0; x.fim = mes; }
+    });
+    if (metodo){
+      const alvo = it.filter(x => x.D > .005).sort(metodo === "avalanche" ? (a, b) => b.r - a.r || a.D - b.D : (a, b) => a.D - b.D || b.r - a.r);
+      for (const x of alvo){ if (pool <= 0) break; const a = Math.min(pool, x.D); x.D -= a; pool -= a; if (x.D <= .005){ x.D = 0; x.fim = mes; } }
+    }
+  }
+  return {juros:r2(juros), meses:mes, ordem:it.slice().sort((a, b) => a.fim - b.fim).map(x => ({nome:x.c.nome, fim:x.fim}))};
+}
+function mesesData(n){ const d = pdk(today()); d.setDate(1); d.setMonth(d.getMonth() + n); return `${MESES[d.getMonth()].slice(0, 3)} ${d.getFullYear()}`; }
+function dividasCard(cs){
+  const ativos = cs.filter(c => credInfo(c).div > 0 && +c.prestacao > 0);
+  if (ativos.length < 2) return "";
+  const extra = UI.credExtra ?? 100;
+  const base = planoDividas(ativos, 0, null), av = planoDividas(ativos, extra, "avalanche"), sb = planoDividas(ativos, extra, "snowball");
+  if (base.erro) return `<section class="card"><h2>Avalanche vs. Snowball</h2><div class="small" style="color:var(--red)">${esc(base.erro)} Confirma a prestação e a TAN de cada crédito.</div></section>`;
+  const semTaxa = ativos.some(c => !(+c.taxa > 0));
+  const linha = (nome, p, desc) => `<div class="asrow">
+    <div class="asname"><b>${nome}</b><span class="xs muted">${desc}</span></div>
+    <div><span class="l">Juros até ao fim</span><b>${eur0(p.juros)}</b></div>
+    <div><span class="l">Poupas</span><b style="color:${p === base ? "var(--muted)" : "var(--green)"}">${p === base ? "—" : eur0(base.juros - p.juros)}</b></div>
+    <div><span class="l">Tudo pago em</span><b>${mesesData(p.meses)}</b><span class="xs muted">${anosMeses(p.meses)}</span></div>
+    <div class="asord xs muted">Ordem: ${p.ordem.map(o => `${esc(o.nome)} (${mesesData(o.fim)})`).join(" → ")}</div></div>`;
+  const melhor = av.juros < sb.juros - 1 ? "avalanche" : sb.juros < av.juros - 1 ? "snowball" : "igual";
+  const prim = m => Math.min(...m.ordem.map(o => o.fim));
+  return `<section class="card" aria-label="Avalanche vs. Snowball">
+    <div class="card-head"><h2>Avalanche vs. Snowball</h2><label class="small" style="display:flex;align-items:center;gap:6px;font-weight:700">Extra por mês <input class="input" inputmode="decimal" data-c="cred-extra" value="${esc(num(extra, 2))}" style="width:90px;height:38px"> €</label></div>
+    <span class="small muted">Com ${eur(extra)} a mais por mês, além das prestações. Quando um crédito acaba, a prestação dele passa a reforçar o seguinte.</span>
+    <div class="aslist">${linha("Sem extra", base, "só as prestações atuais")}${linha("Avalanche", av, "extra para o juro mais alto")}${linha("Snowball", sb, "extra para a menor dívida")}</div>
+    <div class="small" style="font-weight:700">${melhor === "avalanche" ? `Avalanche poupa mais ${eur0(sb.juros - av.juros)} em juros do que Snowball.` : melhor === "snowball" ? `Snowball poupa mais ${eur0(av.juros - sb.juros)} em juros do que Avalanche.` : "Os dois métodos dão praticamente os mesmos juros."}${prim(sb) < prim(av) ? ` Snowball liquida o primeiro crédito mais cedo (${mesesData(prim(sb))} vs. ${mesesData(prim(av))}).` : ""}</div>
+    <span class="xs muted">Estimativa com a TAN e a prestação atuais de cada crédito, sem comissões de amortização${semTaxa ? "; há créditos sem TAN, contados sem juros" : ""}. O banco pode dar valores ligeiramente diferentes.</span>
+  </section>`;
 }
 
 /* série do valor abatido ao longo do tempo (um ponto por movimento) */
@@ -2832,9 +2912,10 @@ function vCreditos(){
   const prest = cs.filter((c, i) => inf[i].div > 0).reduce((a, c) => a + (+c.prestacao || 0), 0);
   const pct = tot ? ab / tot : 0;
   const card = (c, i) => {
-    const x = inf[i], ms = credMovs(c.id).slice(-4).reverse();
+    const x = inf[i], h = credHistorico(c).slice(-3).reverse();
+    const fimContrato = c.fim && x.fim ? Math.round((pdk(c.fim) - x.fim) / (30.44 * 864e5)) : null;
     return `<section class="card cred">
-      <div class="card-head"><div><h2>${esc(c.nome)}</h2><span class="xs muted">${[c.banco, +c.taxa ? `TAN ${num(c.taxa, 2)} %` : "", +c.prestacao ? `prestação ${eur(c.prestacao)}${c.dia ? ", dia " + c.dia : ""}` : ""].filter(Boolean).map(esc).join(" · ") || "&nbsp;"}</span></div>
+      <div class="card-head"><div><h2>${esc(c.nome)}</h2><span class="xs muted">${[c.banco, +c.taxa ? `TAN ${num(c.taxa, 3)} %` : "", +c.taeg ? `TAEG ${num(c.taeg, 3)} %` : "", +c.prestacao ? `prestação ${eur(c.prestacao)}${c.dia ? ", dia " + c.dia : ""}` : ""].filter(Boolean).map(esc).join(" · ") || "&nbsp;"}</span></div>
         <span class="chip ${x.div <= 0 ? "c-ok" : "c-x"}">${x.div <= 0 ? "Pago" : Math.round(x.pct * 100) + " %"}</span></div>
       <div class="credrow">
         <div><div class="l">Valor total</div><div class="v">${eurC(x.total)}</div></div>
@@ -2843,11 +2924,18 @@ function vCreditos(){
       </div>
       <div class="bar big" role="progressbar" aria-valuenow="${Math.round(x.pct * 100)}" aria-valuemin="0" aria-valuemax="100" aria-label="Percentagem abatida"><i style="width:${(x.pct * 100).toFixed(1)}%;background:var(--s${(i % 8) + 1})"></i></div>
       <div class="small" style="display:flex;justify-content:space-between;gap:8px;flex-wrap:wrap"><b>${num(x.pct * 100, 1)} % abatido</b><span class="muted">${x.div <= 0 ? "Crédito liquidado" : x.fim ? `Fica pago em ${MESES[x.fim.getMonth()]} de ${x.fim.getFullYear()} (${x.meses} prestaç${x.meses === 1 ? "ão" : "ões"})` : +c.prestacao ? "A prestação não chega para pagar os juros" : "Indica a prestação para veres quando fica pago"}</span></div>
-      ${ms.length ? `<div class="list">${ms.map(m => `<div class="item"><div class="grow"><div class="t">${eur(m.valor)}</div><div class="s">${shortDate(m.data)}${m.nota ? " · " + esc(m.nota) : ""}${m.origem === "auto" ? " · automático" : ""}</div></div><button class="x" type="button" data-a="del" data-col="credMov" data-id="${m.id}" aria-label="Apagar movimento">${ic("x", 16)}</button></div>`).join("")}</div>` : ""}
+      ${x.div > 0 ? `<div class="credrow">
+        <div><div class="l">Prazo restante</div><div class="v sm">${x.meses != null ? anosMeses(x.meses) : "—"}</div></div>
+        <div><div class="l">Juros até ao fim</div><div class="v sm">${x.jurosRest != null && +c.taxa ? eurC(x.jurosRest) : "—"}</div></div>
+        <div><div class="l">Contrato</div><div class="v sm">${c.inicio || c.fim ? `${c.inicio ? pdk(c.inicio).getFullYear() : "?"}–${c.fim ? pdk(c.fim).getFullYear() : "?"}` : "—"}</div></div>
+      </div>
+      ${fimContrato != null && Math.abs(fimContrato) >= 3 ? `<div class="xs muted">${fimContrato > 0 ? `Com a prestação atual acaba ${anosMeses(fimContrato)} antes da data do contrato (${MESES[pdk(c.fim).getMonth()]} ${pdk(c.fim).getFullYear()}).` : `Com a prestação atual acaba ${anosMeses(-fimContrato)} depois da data do contrato: confirma a prestação e a TAN.`}</div>` : ""}` : ""}
+      ${h.length ? histTabela(h) : ""}
       <div style="display:flex;gap:8px;flex-wrap:wrap">
         <button class="btn sm" type="button" data-a="cred-pag" data-id="${c.id}">+ Pagamento</button>
         <button class="btn sm ghost" type="button" data-a="cred-saldo" data-id="${c.id}">Atualizar valor em dívida</button>
         ${x.div > 0 ? `<button class="btn sm ghost" type="button" data-a="cred-sim" data-id="${c.id}">Simular amortização</button>` : ""}
+        ${credMovs(c.id).length ? `<button class="linkbtn" type="button" data-a="cred-hist" data-id="${c.id}">Histórico</button>` : ""}
         <button class="linkbtn" type="button" data-a="cred-edit" data-id="${c.id}">Editar</button>
       </div>
     </section>`;
@@ -2859,11 +2947,12 @@ function vCreditos(){
   <div class="kpis">
     <div class="kpi inv"><div class="l">Total dos créditos</div><div class="v">${eur0(tot)}</div></div>
     <div class="kpi"><div class="l">Já abatido</div><div class="v" style="color:var(--green)">${eur0(ab)}</div><div class="xs muted">${num(pct * 100, 1)} % do total</div></div>
-    <div class="kpi"><div class="l">Em dívida</div><div class="v">${eur0(div)}</div></div>
+    <div class="kpi"><div class="l">Em dívida</div><div class="v">${eur0(div)}</div>${(() => { const j = inf.filter(x => x.div > 0 && x.jurosRest != null).reduce((a, x) => a + x.jurosRest, 0); return j ? `<div class="xs muted">+ ${eur0(j)} de juros estimados</div>` : ""; })()}</div>
     <div class="kpi"><div class="l">Prestações por mês</div><div class="v">${eur(prest)}</div></div>
   </div>
   <section class="card"><div class="card-head"><h2>Evolução</h2><span class="xs muted">${num(pct * 100, 1)} % de tudo já abatido</span></div>${credChart(cs)}</section>
   <div class="grid g2">${cs.map(card).join("")}</div>
+  ${dividasCard(cs)}
   <p class="xs muted" style="margin:0">«Já abatido» é o capital que já pagaste. Com a prestação automática ligada, a app abate todos os meses a prestação menos os juros (se indicares a TAN). Para acertar com o banco, usa «Atualizar valor em dívida».</p>`
   : `<section class="card acc"><h2>Regista os teus créditos</h2><span class="small">Para cada crédito indica o valor total e quanto já está pago. A app mostra a percentagem abatida, quando fica pago e a evolução num gráfico.</span><div><button class="btn" type="button" data-a="cred-edit" style="background:#16161A;color:#fff">+ Novo crédito</button></div></section>`}`;
 }
@@ -2876,19 +2965,31 @@ function dlgCredito(c = {}){
     <div class="fields"><label class="field">Prestação mensal (€)<input name="prestacao" inputmode="decimal" value="${+c.prestacao ? esc(num(c.prestacao, 2)) : ""}" placeholder="Opcional"></label>
     <label class="field">Dia da prestação<input name="dia" inputmode="numeric" value="${esc(c.dia || "")}" placeholder="Ex.: 5"></label>
     <label class="field">TAN (%)<input name="taxa" inputmode="decimal" value="${+c.taxa ? esc(num(c.taxa, 3)) : ""}" placeholder="Opcional"></label></div>
+    <div class="fields"><label class="field">TAEG (%)<input name="taeg" inputmode="decimal" value="${+c.taeg ? esc(num(c.taeg, 3)) : ""}" placeholder="Opcional"></label>
+    <label class="field">Início do contrato<input type="date" name="inicio" value="${esc(c.inicio || "")}"></label>
+    <label class="field">Fim do contrato<input type="date" name="fim" value="${esc(c.fim || "")}"></label></div>
     <label class="field">Banco ou nota (opcional)<input name="banco" value="${esc(c.banco || "")}"></label>
     <label class="item" style="border:0;min-height:40px"><input class="check" type="checkbox" name="auto" value="1" ${c.auto ? "checked" : ""}> <span class="small" style="font-weight:700">Abater a prestação sozinho todos os meses</span></label>
     <label class="item" style="border:0;min-height:40px"><input class="check" type="checkbox" name="gastos" value="1" ${c.gastos !== false ? "checked" : ""}> <span class="small" style="font-weight:700">Lançar a prestação em Gastos todos os meses (categoria «Créditos»)</span></label>
-    <span class="xs muted">Com a TAN preenchida, a app separa juros e capital em cada prestação e calcula quando o crédito fica pago.</span>`,
+    <span class="xs muted">A TAN serve para separar juros e capital em cada prestação. A TAEG (que inclui comissões e seguros) fica registada para comparares créditos. Sem prestação, mas com TAN e fim do contrato, a app calcula a prestação.</span>`,
   o => {
     if (!o.nome.trim()) throw new Error("Dá um nome ao crédito.");
     const total = vNum(o.total, "o valor total do crédito", {max:5e6});
     const abat = vNum(o.abatido, "o valor já abatido", {opc:true, min:0, max:5e6});
     if (abat > total) throw new Error("O valor já abatido não pode ser maior do que o valor total.");
     const prest = vNum(o.prestacao, "a prestação", {opc:true, min:0, max:1e5});
-    vNum(o.dia, "o dia da prestação", {opc:true, min:1, max:31}); vNum(o.taxa, "a TAN", {opc:true, min:0, max:30});
+    vNum(o.dia, "o dia da prestação", {opc:true, min:1, max:31}); vNum(o.taxa, "a TAN", {opc:true, min:0, max:30}); vNum(o.taeg, "a TAEG", {opc:true, min:0, max:60});
+    vData(o.inicio, "a data de início", true); vData(o.fim, "a data de fim", true);
+    if (o.inicio && o.fim && o.fim <= o.inicio) throw new Error("O fim do contrato tem de ser depois do início.");
+    if (+pnum(o.taeg) > 0 && +pnum(o.taxa) > 0 && pnum(o.taeg) < pnum(o.taxa) - .001) throw new Error("A TAEG não costuma ser menor do que a TAN: confirma os valores.");
+    let prestCalc = 0;
+    if (!pnum(o.prestacao) && pnum(o.taxa) > 0 && o.fim && o.fim > today()){
+      const r = pnum(o.taxa) / 1200, n = Math.max(1, (pdk(o.fim).getFullYear() - pdk(today()).getFullYear()) * 12 + pdk(o.fim).getMonth() - pdk(today()).getMonth()), Dv = total - abat;
+      prestCalc = r2(Dv * r / (1 - Math.pow(1 + r, -n)));
+    }
     if (prest > 0 && +pnum(o.taxa) > 0 && prest <= (total - abat) * pnum(o.taxa) / 1200) throw new Error("A prestação não chega para pagar os juros mensais: confirma a prestação e a TAN.");
-    const base = {id:c.id, nome:o.nome.trim(), total, prestacao:pnum(o.prestacao), dia:Math.min(31, Math.max(0, Math.round(pnum(o.dia)))), taxa:pnum(o.taxa), banco:o.banco.trim(), auto:!!o.auto, gastos:!!o.gastos};
+    const base = {id:c.id, nome:o.nome.trim(), total, prestacao:pnum(o.prestacao) || prestCalc, dia:Math.min(31, Math.max(0, Math.round(pnum(o.dia)))), taxa:pnum(o.taxa), taeg:pnum(o.taeg), inicio:o.inicio || "", fim:o.fim || "", banco:o.banco.trim(), auto:!!o.auto, gastos:!!o.gastos};
+    if (prestCalc) setTimeout(() => toast(`Prestação calculada: ${eur(prestCalc)} por mês (confirma com o banco).`), 400);
     if (!c.id){ base.desde = today(); base.abatidoIni = abat; put("creditos", base); }
     else {
       /* se mudaste o «já abatido», regista a diferença como acerto (fica no gráfico) */
@@ -2900,12 +3001,39 @@ function dlgCredito(c = {}){
   }, "Guardar", c.id ? `<button class="btn danger" type="button" data-a="cred-del" data-id="${c.id}" style="margin-right:auto">Apagar</button>` : "");
 }
 function dlgCredPag(c){
-  const x = credInfo(c), juros = r2(x.div * (+c.taxa || 0) / 1200), sug = +c.prestacao ? r2(Math.max(0, +c.prestacao - juros)) : "";
-  openDlg(`Pagamento · ${c.nome}`, `<div class="fields"><label class="field">Valor abatido ao capital (€)<input name="valor" inputmode="decimal" required value="${sug ? esc(num(sug, 2)) : ""}"></label><label class="field">Data<input type="date" name="data" required value="${esc(diaSel())}"></label></div>
-    <label class="field">Nota (opcional)<input name="nota" placeholder="Ex.: amortização antecipada"></label>
-    <span class="xs muted">${sug ? `Sugestão: prestação ${eur(c.prestacao)}${juros ? ` menos ${eur(juros)} de juros` : ""}. ` : ""}Em dívida: ${eur(x.div)}.</span>`,
-  o => { const v = vNum(o.valor, "o valor"); vData(o.data); if (v > x.div + .005) throw new Error(`O valor é maior do que o que está em dívida (${eur(x.div)}).`); put("credMov", {cred:c.id, data:o.data, valor:Math.min(v, x.div || v), nota:o.nota.trim(), origem:"manual"}); save(); render(); toast("Pagamento registado."); });
+  const x = credInfo(c), r = (+c.taxa || 0) / 1200, P = +c.prestacao || 0, juros = r2(x.div * r);
+  openDlg(`Pagamento · ${c.nome}`, `<div class="seg" role="radiogroup" aria-label="Tipo de pagamento" style="align-self:flex-start">
+      <label style="display:inline-flex;align-items:center;gap:6px;padding:8px 12px"><input type="radio" name="tipo" value="prest" data-pag="1" ${P ? "checked" : ""}> Prestação</label>
+      <label style="display:inline-flex;align-items:center;gap:6px;padding:8px 12px"><input type="radio" name="tipo" value="amort" data-pag="1" ${P ? "" : "checked"}> Amortização extraordinária</label></div>
+    <div class="fields"><label class="field"><span id="pagLbl">${P ? "Valor pago (€)" : "Valor amortizado (€)"}</span><input name="valor" inputmode="decimal" required data-pag="1" value="${P ? esc(num(P, 2)) : ""}"></label><label class="field">Data<input type="date" name="data" required value="${esc(diaSel())}"></label></div>
+    <label class="field pag-com" ${P ? "hidden" : ""}>Comissão de amortização (€, opcional)<input name="comissao" inputmode="decimal" placeholder="0,00"></label>
+    <label class="field">Nota (opcional)<input name="nota"></label>
+    <div id="pagOut" class="small"></div>
+    <span class="xs muted">Em dívida: ${eur(x.div)}${r ? ` · juros deste mês ≈ ${eur(juros)} (TAN ${num(c.taxa, 3)} %)` : ""}.</span>`,
+  o => {
+    const v = vNum(o.valor, "o valor", {max:5e6}); vData(o.data); const com = vNum(o.comissao, "a comissão", {opc:true, min:0, max:1e5});
+    if (o.tipo === "prest"){
+      const j = r2(x.div * r), cap = r2(v - j);
+      if (cap <= 0) throw new Error(`O valor não chega para os juros do mês (${eur(j)}).`);
+      if (cap > x.div + .005) throw new Error(`O capital (${eur(cap)}) é maior do que o que está em dívida (${eur(x.div)}).`);
+      put("credMov", {cred:c.id, data:o.data, valor:cap, juros:j, tipo:"prest", nota:o.nota.trim() || `Prestação ${eur(v)}${j ? ` (juros ${eur(j)})` : ""}`, origem:"manual"});
+    } else {
+      if (v > x.div + .005) throw new Error(`O valor é maior do que o que está em dívida (${eur(x.div)}).`);
+      put("credMov", {cred:c.id, data:o.data, valor:v, juros:0, tipo:"amort", comissao:com || 0, nota:o.nota.trim() || "Amortização extraordinária", origem:"manual"});
+    }
+    save(); render(); toast("Pagamento registado.");
+  });
+  $("#dlgForm").dataset.pag = c.id; pagCalc();
 }
+function pagCalc(){
+  const f = $("#dlgForm"), c = byId("creditos", f.dataset.pag); if (!c || !f.valor) return;
+  const x = credInfo(c), r = (+c.taxa || 0) / 1200, v = pnum(f.valor.value), prest = f.tipo.value === "prest";
+  $("#pagLbl").textContent = prest ? "Valor pago (€)" : "Valor amortizado (€)"; f.querySelector(".pag-com").hidden = prest;
+  const j = r2(x.div * r), cap = prest ? r2(v - j) : v;
+  $("#pagOut").innerHTML = v > 0 ? (prest ? `Capital ${eur(Math.max(0, cap))} + juros ${eur(j)} · fica em dívida <b>${eur(Math.max(0, x.div - Math.max(0, cap)))}</b>` : `Fica em dívida <b>${eur(Math.max(0, x.div - v))}</b>`) : "";
+}
+document.addEventListener("input", e => { const f = e.target.form; if (f && f.id === "dlgForm" && f.dataset.pag && e.target.dataset.pag) pagCalc(); });
+document.addEventListener("change", e => { const f = e.target.form; if (f && f.id === "dlgForm" && f.dataset.pag && e.target.name === "tipo") pagCalc(); });
 function dlgCredSaldo(c){
   const x = credInfo(c);
   openDlg(`Valor em dívida · ${c.nome}`, `<span class="small muted">Escreve o capital em dívida que aparece no banco. A app regista a diferença como valor abatido.</span>
@@ -2915,15 +3043,16 @@ function dlgCredSaldo(c){
 /* folha de Excel com os créditos */
 function credFolha(){
   const cs = live("creditos"); if (!cs.length) return null;
-  const rows = [["Crédito","Valor total","Já abatido","Em dívida","% abatido","Prestação","TAN %","Fica pago em"]];
-  cs.forEach(c => { const x = credInfo(c); rows.push([c.nome, {e:x.total}, {e:x.ab}, {e:x.div}, Math.round(x.pct * 1000) / 10, +c.prestacao ? {e:+c.prestacao} : "", +c.taxa || "", x.fim ? `${MESES[x.fim.getMonth()]} ${x.fim.getFullYear()}` : ""]); });
-  rows.push([], ["Data","Crédito","Valor abatido","Nota"]);
-  live("credMov").slice().sort((a, b) => a.data.localeCompare(b.data)).forEach(m => { const c = byId("creditos", m.cred); if (c && !c.del) rows.push([{d:m.data}, c.nome, {e:+m.valor || 0}, m.nota || ""]); });
+  const rows = [["Crédito","Valor total","Já abatido","Em dívida","% abatido","Prestação","TAN %","TAEG %","Juros até ao fim","Fica pago em"]];
+  cs.forEach(c => { const x = credInfo(c); rows.push([c.nome, {e:x.total}, {e:x.ab}, {e:x.div}, Math.round(x.pct * 1000) / 10, +c.prestacao ? {e:+c.prestacao} : "", +c.taxa || "", +c.taeg || "", x.jurosRest != null && +c.taxa ? {e:x.jurosRest} : "", x.fim ? `${MESES[x.fim.getMonth()]} ${x.fim.getFullYear()}` : ""]); });
+  rows.push([], ["Data","Crédito","Tipo","Capital","Juros","Em dívida","Nota"]);
+  cs.forEach(c => credHistorico(c).forEach(h => rows.push([{d:h.m.data}, c.nome, h.tipo, {e:h.cap}, h.juros == null ? "" : {e:h.juros}, {e:h.div}, h.m.nota || ""])));
   return {nome:"Créditos", rows, widths:[24, 14, 14, 14, 11, 12, 8, 16]};
 }
 
 Object.assign(A, {
   "cred-edit": el => dlgCredito(el.dataset.id ? byId("creditos", el.dataset.id) : {}),
+  "cred-hist": el => dlgHistorico(byId("creditos", el.dataset.id)),
   "cred-pag": el => dlgCredPag(byId("creditos", el.dataset.id)),
   "cred-saldo": el => dlgCredSaldo(byId("creditos", el.dataset.id)),
   "cred-modo": el => { UI.credModo = el.dataset.v; render(); },
