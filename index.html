@@ -454,6 +454,18 @@ a.kpi:hover{outline:2px solid var(--line)}
 .prio .prio-media .pico{background:var(--violet-soft); color:var(--violet-ink)}
 @media (max-width:760px){ .kpis.ind{grid-template-columns:repeat(2,minmax(0,1fr))} .kpis.ind .kpi:last-child:nth-child(odd){grid-column:1 / -1} }
 
+/* v3.13 · Horário */
+.wk{display:grid; grid-template-columns:repeat(7,minmax(0,1fr)); gap:8px}
+.wkday{background:var(--soft); border-radius:16px; padding:8px; display:flex; flex-direction:column; gap:6px; min-width:0; min-height:150px}
+.wkday.today{outline:2px solid var(--ink)} .wkday.sel{outline:2px solid var(--accent)}
+.wkhead{border:0; background:transparent; color:inherit; padding:0; display:flex; flex-direction:column; align-items:flex-start; gap:4px; text-align:left; cursor:pointer; font:inherit}
+.wkhead .chip{white-space:normal; font-size:12px}
+.wkitems{display:flex; flex-direction:column; gap:4px; font-size:13px; min-width:0}
+.wki{overflow-wrap:anywhere; line-height:1.3}
+.wki.warn{color:var(--amber-ink); font-weight:700}
+@media (max-width:1100px){ .wk{grid-template-columns:repeat(4,minmax(0,1fr))} }
+@media (max-width:760px){ .wk{grid-template-columns:1fr} .wkday{min-height:0; flex-direction:row; align-items:flex-start} .wkhead{width:92px; flex-shrink:0} .wkitems{flex:1} }
+
 </style>
 </head>
 <body>
@@ -481,7 +493,7 @@ a.kpi:hover{outline:2px solid var(--line)}
 /* ============================================================
    dia. — núcleo: dados, datas, sincronização, horário
    ============================================================ */
-const APP_VERSION = "3.12 · 03/11/2026";
+const APP_VERSION = "3.13 · 03/11/2026";
 const KEY = "dia-app-v1";
 const VENC_KEY = "vencimento-app-v1";
 const COLS = ["tarefas","eventos","gastos","fixos","refeicoes","agua","treinos","sessoes","inbox","turnos","saude","poupObj","poupMov","poupAuto","recorr","extras","creditos","credMov","prazos","assinaturas","receitas","cardio","corpo"];
@@ -1806,11 +1818,13 @@ function vHorario(){
   const horas = ["M","T","N"].reduce((a, s) => { const r = shiftRange(s); return a + (r ? (r[1] - r[0]) / 60 * cnt[s] : 0); }, 0);
   return `
   <div class="page-head"><div><p>${v ? `Ligado à app Vencimentos · ${esc(v.fonte || "")}` : "Sem ligação à app Vencimentos"}</p><h1>Horário</h1></div>
-    <div style="display:flex;align-items:center;gap:8px">
-      <button class="iconbtn" type="button" data-a="hm" data-v="-1" aria-label="Mês anterior">${ic("left")}</button>
+    <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+      <div class="seg" role="group" aria-label="Vista"><button type="button" data-a="hor-vista" data-v="mes" aria-pressed="${UI.horVista !== "semana"}">Mês</button><button type="button" data-a="hor-vista" data-v="semana" aria-pressed="${UI.horVista === "semana"}">Semana</button></div>
+      ${UI.horVista === "semana" ? "" : `<button class="iconbtn" type="button" data-a="hm" data-v="-1" aria-label="Mês anterior">${ic("left")}</button>
       <b style="min-width:150px;text-align:center;font-size:16px">${MESES[Mo - 1][0].toUpperCase() + MESES[Mo - 1].slice(1)} ${Y}</b>
-      <button class="iconbtn" type="button" data-a="hm" data-v="1" aria-label="Mês seguinte">${ic("right")}</button>
+      <button class="iconbtn" type="button" data-a="hm" data-v="1" aria-label="Mês seguinte">${ic("right")}</button>`}
     </div></div>
+  ${proximoTurnoCard()}
   ${!v ? `<section class="card acc"><h2>Liga o horário da app Vencimentos</h2><span class="small">Se as duas apps estiverem no mesmo endereço, o horário entra sozinho. Se não, importa a cópia de segurança da app Vencimentos (Definições › Cópia de segurança) e o horário passa a sincronizar com o iPhone.</span><div><button class="btn" type="button" data-a="venc-import">Importar cópia da app Vencimentos</button></div></section>` : ""}
   <div class="kpis">
     <div class="kpi"><div class="l">Manhãs · Tardes · Noites</div><div class="v">${cnt.M} · ${cnt.T} · ${cnt.N}</div></div>
@@ -1819,13 +1833,15 @@ function vHorario(){
     <div class="kpi inv"><div class="l">Feriados a trabalhar</div><div class="v">${ferT.length}</div><div class="xs">${ferT.map(k => pdk(k).getDate()).join(", ") || "nenhum"}</div></div>
   </div>
   <div class="row">
-    <section class="card main-col" aria-label="Calendário">
+    ${UI.horVista === "semana" ? semanaHtml(diaSel()) : `<section class="card main-col" aria-label="Calendário">
       <div class="cal-head"><span>Seg</span><span>Ter</span><span>Qua</span><span>Qui</span><span>Sex</span><span>Sáb</span><span>Dom</span></div>
       <div class="cal">${cells}</div>
       <div class="legend"><span><b style="color:var(--amber-ink)">M</b> ${S.cfg.horas.M.join("–")}</span><span><b style="color:var(--sky-ink)">T</b> ${S.cfg.horas.T.join("–")}</span><span><b style="color:var(--violet-ink)">N</b> ${S.cfg.horas.N.join("–")}</span><span><b style="color:var(--green)">F</b> férias</span><span>— folga</span><span style="color:var(--red);font-weight:700">contorno vermelho = feriado</span><span>• alterado aqui</span></div>
-    </section>
+    </section>`}
     <div class="side-col">
+      ${alertasHorarioCard(UI.horMes)}
       ${ajustesCard(UI.horMes)}
+      ${historicoHorasCard(UI.horMes)}
       <section class="card">
         <div class="card-head"><h2>Compromissos do mês</h2><button class="btn sm" type="button" data-a="add-evento">+ Novo</button></div>
         <div class="list">${monthEvs.map(e => `<div class="item"><div class="grow"><div class="t">${esc(e.t)}${e.origem === "google" ? ' <span class="chip c-x">Google</span>' : ""}</div><div class="s">${shortDate(e.data)}${e.hora ? " · " + e.hora : ""}${e.local ? " · " + esc(e.local) : ""}</div></div><button class="x" type="button" data-a="del" data-col="eventos" data-id="${e.id}" aria-label="Apagar compromisso">${ic("x", 16)}</button></div>`).join("") || '<div class="empty">Sem compromissos este mês.</div>'}</div>
@@ -3478,7 +3494,7 @@ function prioridadesHoje(){
   /* horário e treino */
   const tr = conselhoTreino(t); if (tr) add(tr.nivel, "treino", tr.txt, tr.sub, "#treino");
   const pt = proximoTurno(); if (pt && pt.k === t && !pt.agora && pt.ini - nowMin() <= 180) add("media", "horario", `Turno da ${SHIFT_NAME[pt.s]} às ${m2hm(pt.ini)}`, `daqui a ${dur(pt.ini - nowMin())} · sais às ${m2hm(pt.fim)}`, "#horario");
-  const conf = conflitosTurno(t); conf.forEach(c => add("media", "cal", c.txt, c.sub, "#horario"));
+  const conf = conflitos(t, addDays(t, 1)).filter(c => c.tipo !== "treino"); conf.forEach(c => add(c.tipo === "descanso" ? "media" : "media", c.tipo === "descanso" ? "alert" : "cal", c.txt, c.sub, "#horario"));
   const inbox = live("inbox").filter(x => x.estado === "pendente").length;
   if (inbox) add("media", "spark", `${inbox} registo${inbox > 1 ? "s" : ""} por confirmar`, "Entraram sozinhos (Apple Pay, Gmail, Atalhos)", "#hoje");
   return out.sort((a, b) => a.ord - b.ord);
@@ -3682,6 +3698,98 @@ Object.assign(A, {
   "add-corpo": () => dlgCorpo(medicoes().slice(-1)[0] ? {} : {}),
   "evo-per": el => { UI.evoPer = el.dataset.v; render(); }, "evo-met": el => { UI.evoMet = el.dataset.v; render(); }
 });
+
+/* ============================================================
+   dia. — HORÁRIO: próximo turno, vista semanal, histórico de horas
+   e alertas de conflitos (compromissos, treinos e descanso entre turnos)
+   ============================================================ */
+function intervaloTurno(k){ const s = shiftOf(k), r = isWork(s) && shiftRange(s); return r ? {s, a:r[0], b:r[1]} : null; }
+/* conflitos entre dois dias (inclusive) */
+function conflitos(de, ate){
+  const out = [], evs = live("eventos");
+  for (let k = de, n = 0; k <= ate && n < 62; k = addDays(k, 1), n++){
+    const it = intervaloTurno(k), ontem = intervaloTurno(addDays(k, -1));
+    /* compromissos dentro do turno (também os da madrugada seguinte num turno da noite) */
+    evs.filter(e => e.hora && (e.data === k || (it && it.b > 1440 && e.data === addDays(k, 1)))).forEach(e => {
+      if (!it) return;
+      const a = hm2m(e.hora) + (e.data === k ? 0 : 1440), b = a + (+e.dur || 60);
+      if (a < it.b && b > it.a) out.push({k, tipo:"evento", txt:`${e.t} (${shortDate(e.data)} às ${e.hora}) coincide com o turno`, sub:`Turno da ${SHIFT_NAME[it.s]} ${m2hm(it.a)}–${m2hm(it.b)} em ${shortDate(k)}`});
+    });
+    /* compromissos de madrugada logo a seguir a uma noite também caem no turno */
+    if (ontem && ontem.b > 1440) evs.filter(e => e.hora && e.data === k && k === de).forEach(e => { const a = hm2m(e.hora) + 1440, b = a + (+e.dur || 60); if (a < ontem.b && b > ontem.a) out.push({k, tipo:"evento", txt:`${e.t} às ${e.hora} coincide com o fim da noite`, sub:`Turno da noite até às ${m2hm(ontem.b)}`}); });
+    /* treino planeado à hora do turno */
+    if (it) treinosDoDia(k).forEach(tr => { const a = hm2m(tr.hora || S.cfg.treinoHora); if (a == null) return; if (a + 60 > it.a && a < it.b) out.push({k, tipo:"treino", txt:`${tr.nome} às ${m2hm(a)} calha no turno`, sub:`${shortDate(k)}: turno da ${SHIFT_NAME[it.s]} ${m2hm(it.a)}–${m2hm(it.b)}`}); });
+    /* descanso curto até ao turno seguinte */
+    if (it){
+      const prox = intervaloTurno(addDays(k, 1));
+      if (prox){ const gap = 1440 + prox.a - it.b; if (gap < 660 /* 11 h de descanso mínimo */) out.push({k, tipo:"descanso", txt:`Só ${dur(gap)} de descanso entre turnos`, sub:`${shortDate(k)} sais às ${m2hm(it.b)} · ${shortDate(addDays(k, 1))} entras às ${m2hm(prox.a)}`}); }
+    }
+  }
+  return out;
+}
+function proximoTurnoCard(){
+  const pt = proximoTurno(); if (!pt) return "";
+  const t = today(), nm = nowMin(), ini = pt.k === t ? pt.ini - nm : Math.round((pdk(pt.k) - pdk(t)) / 6e4) + pt.ini - nm;
+  const seguintes = []; let k = pt.k;
+  for (let i = 0; i < 14 && seguintes.length < 4; i++){ k = addDays(k, 1); const s = shiftOf(k); if (isWork(s)) seguintes.push({k, s}); }
+  return `<section class="card acc" aria-label="Próximo turno" style="flex-direction:row;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:14px">
+    <div><div class="eyebrow">${pt.agora ? "No turno" : "Próximo turno"}</div>
+      <div class="mid" style="font-size:26px">${pt.agora ? `Turno da ${SHIFT_NAME[pt.s]} até às ${m2hm(pt.fim)}` : `${pt.k === t ? "Hoje" : relDate(pt.k)} · ${SHIFT_NAME[pt.s]} ${m2hm(pt.ini)}–${m2hm(pt.fim)}`}</div>
+      <div class="small" style="font-weight:700">${pt.agora ? `faltam ${dur(pt.fim - nm)}` : `daqui a ${ini >= 1440 ? `${Math.floor(ini / 1440)} d ${dur(ini % 1440)}` : dur(ini)}`}</div></div>
+    ${seguintes.length ? `<div class="small" style="font-weight:600">Depois: ${seguintes.map(x => `${shortDate(x.k).replace(/ \w+$/, "")} <b>${x.s}</b>`).join(" · ")}</div>` : ""}
+  </section>`;
+}
+/* vista semanal: turno, compromissos, treinos e tarefas com hora de cada dia */
+function semanaHtml(ref){
+  const seg = addDays(ref, -((pdk(ref).getDay() + 6) % 7)), t = today(), conf = conflitos(seg, addDays(seg, 6));
+  const dias = Array.from({length:7}, (_, i) => addDays(seg, i)).map(k => {
+    const s = shiftOf(k), it = intervaloTurno(k), evs = live("eventos").filter(e => e.data === k).sort((a, b) => (a.hora || "").localeCompare(b.hora || ""));
+    const trs = treinosDoDia(k), tar = live("tarefas").filter(x => x.data === k && !x.feito), cardio = live("cardio").filter(c => c.data === k);
+    const cf = conf.filter(c => c.k === k);
+    return `<div class="wkday ${k === t ? "today" : ""} ${k === UI.dia && k !== t ? "sel" : ""}">
+      <button type="button" class="wkhead" data-a="day" data-k="${k}"><b>${DOW3[pdk(k).getDay()]} ${pdk(k).getDate()}</b><span class="chip ${chipCls(s)}">${s ? (isWork(s) ? `${s} ${m2hm(it.a)}–${m2hm(it.b)}` : shiftLabel(s)) : "—"}</span>${isHoliday(k) ? '<span class="chip c-alta">Feriado</span>' : ""}</button>
+      <div class="wkitems">
+        ${evs.map(e => `<div class="wki"><span class="xs muted">${esc(e.hora || "dia")}</span> ${esc(e.t)}</div>`).join("")}
+        ${trs.map(tr => `<div class="wki"><span class="xs muted">${esc(tr.hora || S.cfg.treinoHora)}</span> 🏋 ${esc(tr.nome)}${(sessao(k, tr.id) || {}).feito ? " ✓" : ""}</div>`).join("")}
+        ${cardio.map(c => `<div class="wki">🏃 ${esc(c.tipo)}${+c.km ? " " + num(c.km, 1) + " km" : ""}</div>`).join("")}
+        ${tar.slice(0, 3).map(x => `<div class="wki"><span class="xs muted">${esc(x.hora || "")}</span> ☐ ${esc(x.t)}</div>`).join("")}${tar.length > 3 ? `<div class="xs muted">+${tar.length - 3} tarefas</div>` : ""}
+        ${cf.map(c => `<div class="wki warn" title="${esc(c.txt + " · " + c.sub)}">⚠ ${{evento:"compromisso no turno", treino:"treino no turno", descanso:"pouco descanso"}[c.tipo]}</div>`).join("")}
+        ${!evs.length && !trs.length && !tar.length && !cardio.length && !cf.length ? '<div class="xs muted">—</div>' : ""}
+      </div></div>`;
+  }).join("");
+  return `<section class="card main-col" aria-label="Semana">
+    <div class="card-head"><div style="display:flex;align-items:center;gap:6px"><button class="iconbtn" type="button" data-a="hsem" data-v="-7" aria-label="Semana anterior">${ic("left")}</button><b>${pdk(seg).getDate()} ${MESES[pdk(seg).getMonth()].slice(0, 3)} – ${pdk(addDays(seg, 6)).getDate()} ${MESES[pdk(addDays(seg, 6)).getMonth()].slice(0, 3)}</b><button class="iconbtn" type="button" data-a="hsem" data-v="7" aria-label="Semana seguinte">${ic("right")}</button></div>
+      <span class="xs muted">Toca num dia para mudar o turno ou juntar um compromisso</span></div>
+    <div class="wk">${dias}</div>
+  </section>`;
+}
+function alertasHorarioCard(m){
+  const de = `${m}-01`, ate = `${m}-${pad(diasNoMes(m))}`, cs = conflitos(de > today() || ym(today()) !== m ? de : today(), ate);
+  if (!cs.length) return "";
+  return `<section class="card" aria-label="Alertas do horário">
+    <div class="card-head"><h2>Alertas do horário</h2><span class="chip c-media">${cs.length}</span></div>
+    <div class="list">${cs.slice(0, 8).map(c => `<button type="button" class="item" data-a="day" data-k="${c.k}" style="width:100%;text-align:left;border:0;background:transparent;color:inherit"><span style="color:var(--amber-ink)">${ic(c.tipo === "descanso" ? "alert" : c.tipo === "treino" ? "treino" : "cal", 18)}</span><div class="grow"><div class="t">${esc(c.txt)}</div><div class="s">${esc(c.sub)}</div></div></button>`).join("")}</div>
+    ${cs.length > 8 ? `<span class="xs muted">E mais ${cs.length - 8}.</span>` : ""}
+    <span class="xs muted">Descanso mínimo considerado entre turnos: 11 horas.</span>
+  </section>`;
+}
+/* histórico: turnos e horas dos últimos 6 meses */
+function historicoHorasCard(m){
+  const meses = Array.from({length:6}, (_, i) => mesAnt(m, 5 - i)).map(x => {
+    const c = {M:0, T:0, N:0}; let h = 0;
+    for (let d = 1; d <= diasNoMes(x); d++){ const s = shiftOf(`${x}-${pad(d)}`); if (c[s] != null){ c[s]++; const r = shiftRange(s); if (r) h += (r[1] - r[0]) / 60; } }
+    const ex = extrasMes(x).reduce((a, e) => a + (+e.horas || 0), 0);
+    return {x, c, h, ex};
+  });
+  if (!meses.some(x => x.h)) return "";
+  const mx = Math.max(...meses.map(x => x.h + x.ex), 1);
+  return `<section class="card" aria-label="Histórico de horas">
+    <div class="card-head"><h2>Histórico de horas</h2><span class="xs muted">últimos 6 meses</span></div>
+    <div class="chart" style="height:130px">${meses.map((x, i) => `<div class="col"><span class="small" style="font-weight:800;color:var(--ink)">${num(x.h + x.ex, 0)} h</span>${x.ex ? `<i class="proj" style="height:${Math.max(3, x.ex / mx * 100)}%" title="${num(x.ex, 1)} h extra"></i>` : ""}<i class="${i === 5 ? "on" : ""}" style="height:${Math.max(3, x.h / mx * 100)}%" title="${x.c.M} M · ${x.c.T} T · ${x.c.N} N"></i><span>${MESES[+x.x.slice(5) - 1].slice(0, 3)}</span></div>`).join("")}</div>
+    <div class="xs muted">Turnos pelo horário definido${meses.some(x => x.ex) ? "; a tracejado as horas extra" : ""}. ${meses.slice(-1).map(x => `${MESES[+x.x.slice(5) - 1]}: ${x.c.M} manhãs, ${x.c.T} tardes, ${x.c.N} noites.`)}</div>
+  </section>`;
+}
+Object.assign(A, { "hor-vista": el => { UI.horVista = el.dataset.v; render(); } });
 
 /* ============================================================
    dia. — comando por voz e ligação Google
