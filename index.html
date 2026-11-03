@@ -493,10 +493,10 @@ a.kpi:hover{outline:2px solid var(--line)}
 /* ============================================================
    dia. — núcleo: dados, datas, sincronização, horário
    ============================================================ */
-const APP_VERSION = "3.13 · 03/11/2026";
+const APP_VERSION = "3.14 · 03/11/2026";
 const KEY = "dia-app-v1";
 const VENC_KEY = "vencimento-app-v1";
-const COLS = ["tarefas","eventos","gastos","fixos","refeicoes","agua","treinos","sessoes","inbox","turnos","saude","poupObj","poupMov","poupAuto","recorr","extras","creditos","credMov","prazos","assinaturas","receitas","cardio","corpo"];
+const COLS = ["tarefas","eventos","gastos","fixos","refeicoes","agua","treinos","sessoes","inbox","turnos","saude","poupObj","poupMov","poupAuto","recorr","extras","creditos","credMov","prazos","assinaturas","receitas","cardio","corpo","invest","investMov"];
 const DOW = ["Domingo","Segunda","Terça","Quarta","Quinta","Sexta","Sábado"];
 const DOW3 = ["Dom","Seg","Ter","Qua","Qui","Sex","Sáb"];
 const MESES = ["janeiro","fevereiro","março","abril","maio","junho","julho","agosto","setembro","outubro","novembro","dezembro"];
@@ -1350,7 +1350,7 @@ function folhasExcel(){
       sets.forEach((v, j) => { if (v == null || v === "") return; tr.push([{d:s.data}, p.nome, e.n, j + 1, pnum(reps[j]) || reps[j] || "", +v, s.feito ? "Sim" : ""]); });
     });
   });
-  return [{nome:"Gastos", rows:g, widths:[12, 32, 18, 12, 14]}, {nome:"Gastos por mês", rows:gm, widths:[10, 20, 12, 12]}, {nome:"Treinos", rows:tr, widths:[12, 24, 26, 7, 11, 8, 11]}, receitasFolha(), ...cardioFolha(), credFolha()].filter(Boolean);
+  return [{nome:"Gastos", rows:g, widths:[12, 32, 18, 12, 14]}, {nome:"Gastos por mês", rows:gm, widths:[10, 20, 12, 12]}, {nome:"Treinos", rows:tr, widths:[12, 24, 26, 7, 11, 8, 11]}, receitasFolha(), ...cardioFolha(), credFolha(), investFolha()].filter(Boolean);
 }
 function exportarExcel(){
   const blob = xlsxBlob(folhasExcel());
@@ -2207,10 +2207,13 @@ function vPoup(){
     <div class="kpi"><div class="l">Poupança automática</div><div class="v">${eur(autoMes)}</div><div class="xs muted">por mês</div></div>
   </div>
   ${sobra > 0 && objs.length && orcTotal() && new Date(+t.slice(0, 4), +t.slice(5, 7), 0).getDate() - +t.slice(8) < 5 ? `<section class="card acc" style="flex-direction:row;flex-wrap:wrap;align-items:center;justify-content:space-between"><div><h2>Sobram ${eur(sobra)} do orçamento deste mês</h2><span class="small">Podes guardar já uma parte num objetivo.</span></div><button class="btn" type="button" data-a="poup-sobra" data-v="${sobra}" style="background:#16161A;color:#fff">Guardar sobra</button></section>` : ""}
+  ${patrimonioCard()}
   ${sugestoesHtml()}
   <div class="row">
     <div class="main-col">
+      ${emergCard()}
       ${objs.length ? `<div class="grid g2">${objs.map(card).join("")}</div>` : `<section class="card"><h2>Ainda não tens objetivos</h2><span class="small muted">Cria o primeiro: férias, fundo de emergência, carro… Indica quanto queres juntar e até quando, e a app diz-te quanto pôr de lado por mês.</span><div><button class="btn" type="button" data-a="edit-obj">+ Criar objetivo</button></div></section>`}
+      ${previsaoPoupHtml()}
       <section class="card">
         <h2>Últimos 12 meses</h2>
         <div class="chart" role="img" aria-label="Poupança por mês">${meses.map((x, i) => `<div class="col"><i class="${i === 11 ? "on" : ""}" style="height:${Math.max(2, Math.abs(vals[i]) / mx * 85)}%;${vals[i] < 0 ? "background:var(--red-soft)" : ""}" title="${eur(vals[i])}"></i><span>${MESES[+x.slice(5) - 1].slice(0, 3)}</span></div>`).join("")}</div>
@@ -2218,6 +2221,7 @@ function vPoup(){
       </section>
     </div>
     <div class="side-col">
+      ${investCard()}
       <section class="card">
         <div class="card-head"><h2>Poupança automática</h2><button class="btn sm" type="button" data-a="edit-auto">+ Nova</button></div>
         <span class="xs muted">Um valor que passa sozinho para um objetivo, no mesmo dia de cada mês.</span>
@@ -2763,6 +2767,8 @@ document.addEventListener("change", e => {
   else if (c === "aviso"){ setCfg({avisos:Object.assign(avisos(), {[el.dataset.k]:Math.max(0, Math.round(pnum(el.value)))})}); save(); render(); }
   else if (c === "aviso-bool"){ setCfg({avisos:Object.assign(avisos(), {[el.dataset.k]:el.checked})}); save(); }
   else if (c === "aviso-hora"){ if (el.value){ setCfg({avisos:Object.assign(avisos(), {[el.dataset.k || "resumoHora"]:el.value})}); save(); } }
+  else if (c === "emerg-meses"){ const n = Math.round(pnum(el.value)); if (n >= 1 && n <= 24){ setCfg({emerg:Object.assign({}, S.cfg.emerg || {}, {meses:n})}); save(); render(); } }
+  else if (c === "emerg-obj"){ if (el.value){ setCfg({emerg:Object.assign({meses:6}, S.cfg.emerg || {}, {obj:el.value})}); save(); render(); } }
   else if (c === "cred-extra"){ UI.credExtra = Math.max(0, pnum(el.value)); render(); }
   else if (c === "cfg-num"){ setCfg({[el.dataset.k]:pnum(el.value)}); save(); render(); }
   else if (c === "hdia-pick"){ if (el.value) setDia(el.value); }
@@ -3790,6 +3796,156 @@ function historicoHorasCard(m){
   </section>`;
 }
 Object.assign(A, { "hor-vista": el => { UI.horVista = el.dataset.v; render(); } });
+
+/* ============================================================
+   dia. — POUPANÇA E PATRIMÓNIO: fundo de emergência, investimentos,
+   património líquido e previsão da poupança
+   ============================================================ */
+function INVEST_TIPOS(){ return ["PPR","ETF e ações","Certificados de Aforro / Tesouro","Depósito a prazo","Fundos","Cripto","Imobiliário","Outro"]; }
+function invMovs(id){ return live("investMov").filter(m => m.inv === id).sort((a, b) => a.data.localeCompare(b.data) || (a.upd || 0) - (b.upd || 0)); }
+/* valor de um investimento numa data: último valor atualizado + entradas/saídas depois dele; investido = entradas − saídas */
+function invEm(inv, ate = today()){
+  let valor = 0, investido = 0, temValor = false;
+  invMovs(inv.id).filter(m => m.data <= ate).forEach(m => {
+    const v = +m.valor || 0;
+    if (m.tipo === "aporte"){ investido += v; valor += v; }
+    else if (m.tipo === "resgate"){ investido -= v; valor -= v; }
+    else if (m.tipo === "valor"){ valor = v; temValor = true; }
+  });
+  return {valor:r2(Math.max(0, valor)), investido:r2(investido), ganho:r2(valor - investido), temValor};
+}
+function totalInvest(ate){ return r2(live("invest").reduce((a, i) => a + invEm(i, ate).valor, 0)); }
+/* poupança (objetivos) numa data */
+function poupadoAte(ate){ return r2(live("poupMov").filter(m => m.data <= ate && live("poupObj").some(o => o.id === m.obj)).reduce((a, m) => a + (+m.valor || 0), 0)); }
+/* dívida dos créditos numa data, a partir do histórico de pagamentos */
+function dividaAte(ate){
+  return r2(live("creditos").reduce((a, c) => {
+    if ((c.desde || "") > ate && !credMovs(c.id).some(m => m.data <= ate)) return a;
+    const ab = (+c.abatidoIni || 0) + credMovs(c.id).filter(m => m.data <= ate).reduce((s, m) => s + (+m.valor || 0), 0);
+    return a + Math.max(0, (+c.total || 0) - ab);
+  }, 0));
+}
+function patrimonio(ate = today()){ const p = poupadoAte(ate), i = totalInvest(ate), d = dividaAte(ate); return {poup:p, inv:i, div:d, liq:r2(p + i - d)}; }
+
+/* ---------- fundo de emergência ---------- */
+function despesaMensalMedia(){
+  const t = today(), ms = [1, 2, 3].map(n => mesAnt(ym(t), n)).filter(m => gastosMes(m).length);
+  if (ms.length) return r2(ms.reduce((a, m) => a + somaGastos(gastosMes(m)), 0) / ms.length);
+  return previsaoMes().gastos || orcTotal();
+}
+function emergCard(){
+  const cfg = S.cfg.emerg || {}, meses = +cfg.meses || 6, o = cfg.obj && byId("poupObj", cfg.obj), desp = despesaMensalMedia();
+  const alvo = r2(desp * meses), tem = o && !o.del ? saldoObj(o.id) : 0, cob = desp ? tem / desp : 0, p = alvo ? Math.min(100, tem / alvo * 100) : 0;
+  const objs = live("poupObj");
+  return `<section class="card" aria-label="Fundo de emergência">
+    <div class="card-head"><h2>Fundo de emergência</h2><label class="small" style="display:flex;align-items:center;gap:6px;font-weight:700"><input class="input" inputmode="numeric" data-c="emerg-meses" value="${meses}" style="width:56px;height:36px"> meses</label></div>
+    ${desp ? `<span class="small muted">As tuas despesas médias são ${eur(desp)} por mês (últimos 3 meses). ${meses} meses = <b style="color:var(--ink)">${eur0(alvo)}</b>.</span>` : '<span class="small muted">Regista gastos durante algum tempo para a app calcular as tuas despesas médias.</span>'}
+    ${o && !o.del ? `<div style="display:flex;align-items:baseline;gap:8px;flex-wrap:wrap"><span class="big">${eur(tem)}</span><span class="small muted">${desp ? `cobre ${num(cob, 1)} mes${cob >= 1.95 || cob < .95 ? "es" : ""} de despesas` : ""}</span></div>
+      <div class="bar"><i style="width:${p.toFixed(0)}%;background:${p >= 100 ? "var(--green)" : "var(--s4)"}"></i></div>
+      <span class="small">${p >= 100 ? "Fundo completo 🎉" : `Faltam ${eur(alvo - tem)}.`} <span class="muted">Guardado no objetivo «${esc(o.nome)}».</span></span>`
+    : `<div class="small">${objs.length ? `Qual dos teus objetivos é o fundo de emergência?</div><select class="input" data-c="emerg-obj"><option value="">Escolher…</option>${objs.map(x => `<option value="${x.id}">${esc(x.nome)}</option>`).join("")}</select><div class="small">ou ` : ""}<button class="btn sm" type="button" data-a="emerg-criar">Criar objetivo «Fundo de emergência»</button></div>`}
+  </section>`;
+}
+
+/* ---------- investimentos ---------- */
+function dlgInvest(i = {}){
+  const atual = i.id ? invEm(i) : null;
+  openDlg(i.id ? "Editar investimento" : "Novo investimento", `<label class="field">Nome<input name="nome" required value="${esc(i.nome || "")}" placeholder="Ex.: PPR, ETF S&P 500, Certificados de Aforro"></label>
+    <label class="field">Tipo<select name="tipo">${opt(INVEST_TIPOS(), i.tipo || "ETF e ações")}</select></label>
+    ${i.id ? "" : `<div class="fields"><label class="field">Quanto investiste (€)<input name="investido" inputmode="decimal" required placeholder="Ex.: 3000"></label>
+    <label class="field">Quanto vale hoje (€)<input name="valor" inputmode="decimal" placeholder="Igual ao investido"></label></div>`}
+    <label class="field">Nota (opcional)<input name="nota" value="${esc(i.nota || "")}" placeholder="Ex.: corretora, conta"></label>
+    ${atual ? `<span class="xs muted">Vale hoje ${eur(atual.valor)} · investido ${eur(atual.investido)}. Para mudar valores usa «Atualizar valor» ou «Aporte».</span>` : ""}`,
+  o => {
+    if (!o.nome.trim()) throw new Error("Dá um nome ao investimento.");
+    if (i.id){ put("invest", {id:i.id, nome:o.nome.trim(), tipo:o.tipo, nota:o.nota.trim()}); }
+    else {
+      const inv = vNum(o.investido, "o valor investido", {min:0, max:1e8}), val = vNum(o.valor, "o valor atual", {opc:true, min:0, max:1e8});
+      const n = put("invest", {nome:o.nome.trim(), tipo:o.tipo, nota:o.nota.trim(), desde:today()});
+      if (inv) put("investMov", {inv:n.id, data:today(), tipo:"aporte", valor:inv, nota:"Valor inicial"});
+      if (val && Math.abs(val - inv) >= .01) put("investMov", {inv:n.id, data:today(), tipo:"valor", valor:val});
+    }
+    save(); render(); toast("Investimento guardado.");
+  }, "Guardar", i.id ? `<button class="btn danger" type="button" data-a="inv-del" data-id="${i.id}" style="margin-right:auto">Apagar</button>` : "");
+}
+function dlgInvMov(i, tipo){
+  const x = invEm(i), tit = {valor:"Atualizar valor", aporte:"Aporte (pôr dinheiro)", resgate:"Resgate (tirar dinheiro)"}[tipo];
+  openDlg(`${tit} · ${i.nome}`, `<div class="fields"><label class="field">${tipo === "valor" ? "Quanto vale agora (€)" : "Valor (€)"}<input name="valor" inputmode="decimal" required value="${tipo === "valor" ? esc(num(x.valor, 2)) : ""}"></label><label class="field">Data<input type="date" name="data" required value="${esc(today())}"></label></div>
+    <span class="xs muted">${tipo === "valor" ? "Vê o valor na app do banco ou da corretora. O ganho é a diferença para o que investiste." : tipo === "aporte" ? "Dinheiro novo que puseste neste investimento." : `Dinheiro que tiraste. Vale hoje ${eur(x.valor)}.`}</span>`,
+  o => {
+    const v = vNum(o.valor, "o valor", {min:tipo === "valor" ? 0 : .01, max:1e8}); vData(o.data);
+    if (tipo === "resgate" && v > x.valor + .005) throw new Error(`Não podes tirar mais do que vale (${eur(x.valor)}).`);
+    put("investMov", {inv:i.id, data:o.data, tipo, valor:v}); save(); render(); toast("Registado.");
+  });
+}
+function investCard(){
+  const is = live("invest").map(i => ({i, x:invEm(i)})).sort((a, b) => b.x.valor - a.x.valor);
+  const tv = is.reduce((a, y) => a + y.x.valor, 0), ti = is.reduce((a, y) => a + y.x.investido, 0), g = tv - ti;
+  return `<section class="card" aria-label="Investimentos">
+    <div class="card-head"><h2>Investimentos</h2><button class="btn sm" type="button" data-a="inv-add">+ Investimento</button></div>
+    ${is.length ? `<div style="display:flex;gap:18px;flex-wrap:wrap">
+      <div><div class="xs muted" style="font-weight:700">Valem hoje</div><div class="mid">${eur0(tv)}</div></div>
+      <div><div class="xs muted" style="font-weight:700">Investido</div><div class="mid">${eur0(ti)}</div></div>
+      <div><div class="xs muted" style="font-weight:700">Ganho</div><div class="mid" style="color:${g >= 0 ? "var(--green)" : "var(--red)"}">${g >= 0 ? "+" : "−"}${eur0(Math.abs(g))}${ti > 0 ? ` <span class="small">(${g >= 0 ? "+" : "−"}${num(Math.abs(g / ti * 100), 1)} %)</span>` : ""}</div></div></div>
+    <div class="list">${is.map(({i, x}) => `<div class="item" style="flex-wrap:wrap"><div class="grow"><div class="t">${esc(i.nome)}</div><div class="s">${esc(i.tipo)} · investido ${eur(x.investido)}${x.investido > 0 ? ` · <span style="color:${x.ganho >= 0 ? "var(--green)" : "var(--red)"};font-weight:700">${x.ganho >= 0 ? "+" : "−"}${eur(Math.abs(x.ganho))} (${num(Math.abs(x.ganho / x.investido * 100), 1)} %)</span>` : ""}${(() => { const u = invMovs(i.id).filter(m => m.tipo === "valor").pop(); return u ? ` · valor de ${shortDate(u.data)}` : ""; })()}</div></div><span class="amount">${eur(x.valor)}</span>
+      <div style="display:flex;gap:6px;flex-basis:100%;flex-wrap:wrap"><button class="btn sm" type="button" data-a="inv-mov" data-t="valor" data-id="${i.id}">Atualizar valor</button><button class="btn sm ghost" type="button" data-a="inv-mov" data-t="aporte" data-id="${i.id}">Aporte</button><button class="btn sm ghost" type="button" data-a="inv-mov" data-t="resgate" data-id="${i.id}">Resgate</button><button class="linkbtn" type="button" data-a="inv-edit" data-id="${i.id}">Editar</button></div></div>`).join("")}</div>
+    <span class="xs muted">Os valores são os que escreves (da app do banco ou da corretora). O ganho não conta impostos nem comissões.</span>`
+    : '<div class="empty">PPR, ETF, certificados de aforro, depósitos a prazo… regista quanto investiste e atualiza o valor de vez em quando.</div>'}
+  </section>`;
+}
+
+/* ---------- património líquido ---------- */
+function patrimonioCard(){
+  const temAlgo = live("poupObj").length || live("invest").length || live("creditos").length;
+  if (!temAlgo) return "";
+  const t = today(), meses = Array.from({length:12}, (_, i) => mesAnt(ym(t), 11 - i)), pts = meses.map((m, i) => { const fim = i === 11 ? t : `${m}-${pad(diasNoMes(m))}`; return Object.assign({m}, patrimonio(fim)); });
+  const p = pts[11], ant = pts.filter(x => x.poup || x.inv || x.div)[0];
+  const vals = pts.map(x => x.liq), lo = Math.min(0, ...vals), hi = Math.max(1, ...vals), rng = hi - lo || 1;
+  return `<section class="card" aria-label="Património líquido">
+    <div class="card-head"><h2>Património líquido</h2><span class="xs muted">poupança + investimentos − créditos</span></div>
+    <div style="display:flex;align-items:baseline;gap:10px;flex-wrap:wrap"><span class="big" style="color:${p.liq >= 0 ? "inherit" : "var(--red)"}">${p.liq < 0 ? "−" : ""}${eur0(Math.abs(p.liq))}</span>${ant && ant !== p ? `<span class="small" style="font-weight:700;color:${p.liq >= ant.liq ? "var(--green)" : "var(--red)"}">${p.liq >= ant.liq ? "+" : "−"}${eur0(Math.abs(p.liq - ant.liq))} desde ${MESES[+ant.m.slice(5) - 1].slice(0, 3)}</span>` : ""}</div>
+    <div class="credrow"><div><div class="l">Poupança</div><div class="v sm" style="color:var(--green)">${eur0(p.poup)}</div></div><div><div class="l">Investimentos</div><div class="v sm" style="color:var(--green)">${eur0(p.inv)}</div></div><div><div class="l">Créditos</div><div class="v sm" style="color:var(--red)">−${eur0(p.div)}</div></div></div>
+    ${(() => { const W = Math.round(Math.max(280, window.innerWidth < 761 ? window.innerWidth - 70 : 640)), H = 150, T = 16, B = 20, ph = H - T - B, bw = W / 12;
+      const Y = v => T + (hi - v) / rng * ph, z = Y(0);
+      return `<svg class="lchart" viewBox="0 0 ${W} ${H}" width="100%" height="${H}" preserveAspectRatio="none" role="img" aria-label="Património líquido nos últimos 12 meses">
+        <line x1="0" x2="${W}" y1="${z}" y2="${z}" stroke="var(--muted)" stroke-width="1" opacity=".5"/>
+        ${pts.map((x, i) => { const y = Y(x.liq), top = Math.min(y, z), h = Math.max(1.5, Math.abs(y - z)); return `<rect x="${i * bw + bw * .18}" y="${top}" width="${bw * .64}" height="${h}" rx="3" fill="${x.liq >= 0 ? (i === 11 ? "var(--accent)" : "var(--s3)") : (i === 11 ? "var(--red)" : "var(--red-soft)")}"><title>${MESES[+x.m.slice(5) - 1]}: ${eur(x.liq)}</title></rect><text x="${i * bw + bw / 2}" y="${H - 5}" text-anchor="middle" class="xl">${MESES[+x.m.slice(5) - 1].slice(0, 1).toUpperCase()}</text>`; }).join("")}
+      </svg>`; })()}
+    <span class="xs muted">Calculado com o histórico de depósitos, valores dos investimentos e pagamentos dos créditos registados na app.</span>
+  </section>`;
+}
+
+/* ---------- previsão da poupança ---------- */
+function previsaoPoupHtml(){
+  const t = today(), ms = [1, 2, 3].map(n => mesAnt(ym(t), n));
+  const auto = live("poupAuto").filter(a => live("poupObj").some(o => o.id === a.obj)).reduce((a, x) => a + (+x.valor || 0), 0);
+  const hist = ms.map(poupadoMes), comDados = hist.filter(v => v !== 0);
+  const ritmo = r2(Math.max(auto, comDados.length ? comDados.reduce((a, b) => a + b, 0) / comDados.length : 0));
+  if (ritmo <= 0) return "";
+  const tot = totalPoupado(), em12 = r2(tot + ritmo * 12);
+  const objs = live("poupObj").filter(o => +o.alvo > saldoObj(o.id));
+  return `<section class="card" aria-label="Previsão da poupança">
+    <div class="card-head"><h2>Previsão</h2><span class="xs muted">estimativa, não garantida</span></div>
+    <div class="small">Ao ritmo de <b>${eur(ritmo)} por mês</b> ${comDados.length ? `(média dos últimos meses${auto ? " e poupança automática" : ""})` : "(poupança automática)"}, daqui a 12 meses terás cerca de <b>${eur0(em12)}</b> poupados.</div>
+    ${objs.length ? `<div class="list">${objs.map(o => { const falta = +o.alvo - saldoObj(o.id), n = Math.ceil(falta / ritmo), d = pdk(t); d.setDate(1); d.setMonth(d.getMonth() + n); const atrasa = o.data && dk(d) > o.data;
+      return `<div class="item"><div class="grow"><div class="t">${esc(o.nome)}</div><div class="s">faltam ${eur(falta)} · ${n <= 600 ? `por volta de ${MESES[d.getMonth()]} de ${d.getFullYear()}` : "muito tempo"}${atrasa ? ` <span style="color:var(--amber-ink);font-weight:700">· depois da data que definiste</span>` : ""}</div></div></div>`; }).join("")}</div>
+    <span class="xs muted">Cada objetivo calculado como se todo o ritmo fosse para ele.</span>` : ""}
+  </section>`;
+}
+function investFolha(){
+  const is = live("invest"); if (!is.length) return null;
+  const rows = [["Investimento","Tipo","Investido","Vale","Ganho","Ganho %"]];
+  is.forEach(i => { const x = invEm(i); rows.push([i.nome, i.tipo, {e:x.investido}, {e:x.valor}, {e:x.ganho}, x.investido ? Math.round(x.ganho / x.investido * 1000) / 10 : ""]); });
+  rows.push([], ["Data","Investimento","Movimento","Valor"]);
+  live("investMov").slice().sort((a, b) => a.data.localeCompare(b.data)).forEach(m => { const i = byId("invest", m.inv); if (i && !i.del) rows.push([{d:m.data}, i.nome, {aporte:"Aporte", resgate:"Resgate", valor:"Valor atualizado"}[m.tipo] || m.tipo, {e:+m.valor || 0}]); });
+  return {nome:"Investimentos", rows, widths:[26, 22, 12, 12, 12, 9]};
+}
+Object.assign(A, {
+  "inv-add": () => dlgInvest(), "inv-edit": el => dlgInvest(byId("invest", el.dataset.id)),
+  "inv-mov": el => dlgInvMov(byId("invest", el.dataset.id), el.dataset.t),
+  "inv-del": el => { const id = el.dataset.id; $("#dlg").close("cancel"); setTimeout(() => openDlg("Apagar este investimento?", '<span class="small">Apaga o investimento e o histórico de valores.</span>', () => { remove("invest", id); live("investMov").filter(m => m.inv === id).forEach(m => remove("investMov", m.id)); save(); render(); toast("Apagado."); }, "Apagar"), 50); },
+  "emerg-criar": () => { const o = put("poupObj", {nome:"Fundo de emergência", alvo:r2(despesaMensalMedia() * ((S.cfg.emerg || {}).meses || 6)), data:""}); setCfg({emerg:Object.assign({meses:6}, S.cfg.emerg || {}, {obj:o.id})}); save(); render(); toast("Objetivo criado."); }
+});
 
 /* ============================================================
    dia. — comando por voz e ligação Google
