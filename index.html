@@ -1058,6 +1058,36 @@ function previsaoMes(){
   const base = (vm ? vm.liquido : orcTotal()) + somaReceitas(receitasMes(m));
   return {gastos, poup, base, comVenc:!!vm, fim:r2(base - gastos - (vm ? poup : 0)), cedo:d < 5 && nDias < 30, dia:d, nd, ritmo:r2(ritmo)};
 }
+/* resumo das despesas fixas: total do mês e quanto sobra do vencimento para o resto, com gráfico em anel */
+function fixosResumoHtml(k = today()){
+  const cs = live("creditos").filter(c => credLancaGastos(c) && credInfo(c).div > 0);
+  const itens = live("fixos").map(f => ({n:f.desc || f.cat || "Despesa fixa", v:+f.valor || 0}))
+    .concat(cs.map(c => ({n:`Prestação · ${c.nome}`, v:+c.prestacao || 0}))).filter(x => x.v > 0).sort((a, b) => b.v - a.v);
+  const total = r2(itens.reduce((a, x) => a + x.v, 0));
+  if (!total) return "";
+  const vm = vencOrc(k), sal = vm ? +vm.liquido || 0 : 0, resto = r2(sal - total);
+  const cores = ["var(--s1)","var(--s2)","var(--s7)","var(--s4)","var(--s5)","var(--s8)"];
+  const fat = itens.length > 6 ? itens.slice(0, 5).concat([{n:`Outras (${itens.length - 5})`, v:itens.slice(5).reduce((a, x) => a + x.v, 0)}]) : itens;
+  fat.forEach((x, i) => x.c = cores[i % cores.length]);
+  const fatias = fat.slice(); if (sal && resto > 0) fatias.push({n:"Sobra", v:resto, c:"var(--green)"});
+  const base = Math.max(sal, total), R = 46, C = 2 * Math.PI * R; let off = 0;
+  const arcos = fatias.map(x => { const len = x.v / base * C, gap = fatias.length > 1 ? Math.min(1.5, len * .3) : 0, a = `<circle cx="60" cy="60" r="${R}" fill="none" stroke="${x.c}" stroke-width="14" stroke-dasharray="${Math.max(0, len - gap).toFixed(2)} ${C.toFixed(2)}" stroke-dashoffset="${(-off).toFixed(2)}" transform="rotate(-90 60 60)"><title>${esc(x.n)}: ${eur(x.v)}</title></circle>`; off += len; return a; }).join("");
+  const pct = sal ? Math.round(total / sal * 100) : null, neg = sal && resto < 0;
+  const centro = sal ? `<text x="60" y="58" text-anchor="middle" font-size="20" font-weight="800" fill="${neg ? "var(--red)" : "var(--ink)"}" font-family="inherit">${pct} %</text><text x="60" y="75" text-anchor="middle" font-size="10" fill="var(--muted)" font-family="inherit">em fixas</text>`
+    : `<text x="60" y="64" text-anchor="middle" font-size="15" font-weight="800" fill="var(--ink)" font-family="inherit">${eur0(total)}</text>`;
+  const leg = fatias.map(x => `<div style="display:flex;align-items:center;gap:8px;min-width:0"><i style="width:10px;height:10px;border-radius:3px;background:${x.c};flex:none"></i><span class="xs" style="flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(x.n)}</span><b class="xs">${eur(x.v)}</b></div>`).join("");
+  return `<div style="display:flex;flex-direction:column;gap:10px;padding:12px;border-radius:var(--r-sm);background:var(--soft)" aria-label="Resumo das despesas fixas">
+    <div style="display:grid;grid-template-columns:${sal ? "1fr 1fr" : "1fr"};gap:10px">
+      <div><div class="xs muted" style="font-weight:700">Total fixas</div><div class="mid" style="font-size:22px">${eur(total)}</div><div class="xs muted">${itens.length} despesa${itens.length === 1 ? "" : "s"} por mês</div></div>
+      ${sal ? `<div><div class="xs muted" style="font-weight:700">Sobra do vencimento</div><div class="mid" style="font-size:22px;color:${neg ? "var(--red)" : "var(--green)"}">${neg ? "−" + eur(-resto) : eur(resto)}</div><div class="xs muted">de ${eur(sal)} líquidos</div></div>` : ""}
+    </div>
+    <div style="display:flex;align-items:center;gap:14px;flex-wrap:wrap">
+      <svg width="120" height="120" viewBox="0 0 120 120" role="img" aria-label="${sal ? `${eur(total)} em despesas fixas e ${eur(resto)} que sobram de ${eur(sal)} de vencimento` : `${eur(total)} em despesas fixas`}" style="flex:none"><circle cx="60" cy="60" r="${R}" fill="none" stroke="var(--line)" stroke-width="14"/>${arcos}${centro}</svg>
+      <div style="flex:1 1 140px;min-width:0;display:flex;flex-direction:column;gap:6px">${leg}</div>
+    </div>
+    ${neg ? `<span class="xs" style="color:var(--red);font-weight:700">As despesas fixas passam o vencimento em ${eur(-resto)}.</span>` : sal ? `<span class="xs muted">Sobram ${eur(resto)} para comida, transportes, lazer e outras despesas do mês.</span>` : `<span class="xs muted">Liga a app Vencimentos para veres quanto sobra do vencimento depois das fixas.</span>`}
+  </div>`;
+}
 function fixosProximos(dias = avisos().fixosDias){
   const t = today(), fim = addDays(t, Math.max(0, +dias || 0)), out = [];
   live("fixos").concat(live("creditos").filter(c => credLancaGastos(c) && credInfo(c).div > 0).map(c => ({id:"c" + c.id, desc:`Prestação · ${c.nome}`, valor:+c.prestacao, dia:+c.dia || 1}))).forEach(f => {
@@ -2068,6 +2098,7 @@ function vGastos(){
       <section class="card">
         <div class="card-head"><h2>Despesas fixas</h2><button class="btn sm" type="button" data-a="edit-fixo">+ Fixa</button></div>
         <span class="xs muted">Entram sozinhas em Gastos no dia de cada mês. Recebes um aviso ${avisos().fixosDias} dia${avisos().fixosDias == 1 ? "" : "s"} antes (muda em Definições › Notificações).</span>
+        ${fixosResumoHtml(cur ? t : `${m}-${pad(nd)}`)}
         ${credFixosCard()}
         ${live("creditos").some(c => credLancaGastos(c)) ? '<div class="xs muted" style="font-weight:700;margin-top:4px">Outras despesas fixas</div>' : ""}
         <div class="list">${live("fixos").sort((a, b) => (+a.dia) - (+b.dia)).map(f => `<div class="item"><div class="grow"><div class="t">${esc(f.desc)}</div><div class="s">Dia ${esc(f.dia)} · ${esc(f.cat)}</div></div><span class="amount">${eur(f.valor)}</span><button class="linkbtn" type="button" data-a="edit-fixo" data-id="${f.id}">Editar</button><button class="x" type="button" data-a="del" data-col="fixos" data-id="${f.id}" aria-label="Apagar despesa fixa">${ic("x", 16)}</button></div>`).join("") || '<div class="empty">Renda, luz, internet, ginásio…</div>'}</div>
