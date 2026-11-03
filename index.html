@@ -444,6 +444,16 @@ details.fold:not([open]){gap:0}
   .card-head h2, .card > h2, details.fold > summary h2{font-size:17px}
 }
 
+/* v3.11 · Hoje inteligente */
+.kpis.ind{grid-template-columns:repeat(auto-fit,minmax(150px,1fr))}
+a.kpi{text-decoration:none; color:inherit}
+a.kpi:hover{outline:2px solid var(--line)}
+.prio .item{min-height:52px}
+.prio .pico{width:34px; height:34px; border-radius:12px; display:flex; align-items:center; justify-content:center; flex-shrink:0; background:var(--soft); color:var(--muted)}
+.prio .prio-alta .pico{background:var(--red-soft); color:var(--red)}
+.prio .prio-media .pico{background:var(--violet-soft); color:var(--violet-ink)}
+@media (max-width:760px){ .kpis.ind{grid-template-columns:repeat(2,minmax(0,1fr))} .kpis.ind .kpi:last-child:nth-child(odd){grid-column:1 / -1} }
+
 </style>
 </head>
 <body>
@@ -471,7 +481,7 @@ details.fold:not([open]){gap:0}
 /* ============================================================
    dia. — núcleo: dados, datas, sincronização, horário
    ============================================================ */
-const APP_VERSION = "3.10 · 03/11/2026";
+const APP_VERSION = "3.11 · 03/11/2026";
 const KEY = "dia-app-v1";
 const VENC_KEY = "vencimento-app-v1";
 const COLS = ["tarefas","eventos","gastos","fixos","refeicoes","agua","treinos","sessoes","inbox","turnos","saude","poupObj","poupMov","poupAuto","recorr","extras","creditos","credMov","prazos","assinaturas","receitas"];
@@ -1540,7 +1550,7 @@ function vHoje(){
         <a class="btn" href="#horario" style="background:#16161A;color:#fff;align-self:flex-start">Ver horário</a>`;
     } else {
       nowHtml = `<div class="card-head"><span class="eyebrow">Agora</span>${now.s ? `<span class="chip" style="background:#16161A;color:var(--accent)">${chipTxt(now.s)}</span>` : ""}</div>
-        <div><div class="mid">${now.s === "F" ? "Férias" : now.s === "-" ? "Dia de folga" : "Nada marcado"}</div><div class="small" style="font-weight:600">Mais nada no horário para hoje.</div></div>
+        <div><div class="mid">${now.s === "F" ? "Férias" : now.s === "-" ? "Dia de folga" : "Nada marcado"}</div><div class="small" style="font-weight:600">${esc(proximoTurnoTxt(proximoTurno())) || "Mais nada no horário para hoje."}</div></div>
         <button class="btn" type="button" data-a="add-evento" style="background:#16161A;color:#fff;align-self:flex-start">+ Compromisso</button>`;
     }
   } else {
@@ -1585,7 +1595,7 @@ function vHoje(){
     <div class="now">${nowHtml}</div>
   </section>
 
-  ${isT ? avisosHtml() : ""}
+  ${isT ? indicadoresHtml() + prioridadesHtml() : ""}
   ${isT && (pdk(t).getDay() === 0 || (pdk(t).getDay() === 1 && h < 12)) ? (() => { const r = resumoSemana(pdk(t).getDay() === 1 ? addDays(t, -1) : t); return `<section class="card acc" style="flex-direction:row;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:12px" aria-label="Resumo da semana">
     <div><div class="eyebrow">Resumo da semana</div><div class="mid">${eur0(r.gastos)} gastos · ${r.feitos} treino${r.feitos === 1 ? "" : "s"} · ${r.abertas.length} tarefa${r.abertas.length === 1 ? "" : "s"} por fazer</div><div class="small" style="font-weight:600">Próxima semana: ${pl(r.cont.M, "manhã", "manhãs")}, ${pl(r.cont.T, "tarde", "tardes")}, ${pl(r.cont.N, "noite", "noites")}</div></div>
     <button class="btn" type="button" data-a="resumo" data-k="${pdk(t).getDay() === 1 ? addDays(t, -1) : t}" style="background:#16161A;color:#fff">Ver resumo</button></section>`; })() : ""}
@@ -3407,6 +3417,99 @@ Object.assign(A, {
   "edit-receita": el => dlgReceita(byId("receitas", el.dataset.id)),
   "del-receita": el => { $("#dlg").close("cancel"); remove("receitas", el.dataset.id); save(); render(); toast("Receita apagada."); }
 });
+
+/* ============================================================
+   dia. — HOJE INTELIGENTE: prioridades do dia e indicadores
+   Junta tarefas, horário, treino, dinheiro, prazos e pagamentos.
+   Só usa dados da app; nada é inventado.
+   ============================================================ */
+/* próximo turno de trabalho (hoje, se ainda não acabou) */
+function proximoTurno(){
+  const t = today(), nm = nowMin();
+  for (let i = 0; i < 21; i++){
+    const k = addDays(t, i), s = shiftOf(k);
+    if (!isWork(s)) continue;
+    const r = shiftRange(s); if (!r) continue;
+    if (i === 0 && nm >= r[1]) continue;
+    return {k, s, ini:r[0], fim:r[1], agora:i === 0 && nm >= r[0]};
+  }
+  return null;
+}
+function proximoTurnoTxt(p){
+  if (!p) return "";
+  if (p.agora) return `Estás no turno da ${SHIFT_NAME[p.s]} até às ${m2hm(p.fim)}`;
+  const quando = p.k === today() ? "hoje" : p.k === addDays(today(), 1) ? "amanhã" : shortDate(p.k).toLowerCase();
+  return `Próximo turno: ${quando}, ${SHIFT_NAME[p.s]} ${m2hm(p.ini)}–${m2hm(p.fim)}`;
+}
+/* treino do dia ajustado ao horário */
+function conselhoTreino(k){
+  const trs = treinosDoDia(k).filter(x => !(sessao(k, x.id) || {}).feito);
+  if (!trs.length) return null;
+  const s = shiftOf(k), ontem = shiftOf(addDays(k, -1)), nome = trs.map(x => x.nome).join(" + "), r = isWork(s) && shiftRange(s);
+  if (s === "N") return {txt:`${nome}: hoje és de noite`, sub:"Faz um treino leve antes do turno ou descansa.", nivel:"info"};
+  if (ontem === "N") return {txt:`${nome} depois de uma noite`, sub:"Descansa primeiro; treina ao fim da tarde se te sentires bem.", nivel:"info"};
+  if (s === "T" && r) return {txt:`${nome} antes do turno`, sub:`Entras às ${m2hm(r[0])}: treina de manhã, até às ${m2hm(r[0] - 75)}.`, nivel:"media"};
+  if (s === "M" && r) return {txt:`${nome} depois do turno`, sub:`Sais às ${m2hm(r[1])}: a partir das ${m2hm(r[1] + 60)}.`, nivel:"media"};
+  const h = trs[0].hora || S.cfg.treinoHora;
+  return {txt:`${nome}${h ? " às " + h : ""}`, sub:"Dia sem turno.", nivel:"media"};
+}
+/* lista ordenada do que importa hoje */
+function prioridadesHoje(){
+  const t = today(), out = [], add = (nivel, ic0, txt, sub, href, a) => out.push({nivel, ic:ic0, txt, sub, href, a, ord:{alta:0, media:1, info:2}[nivel]});
+  const tar = live("tarefas").filter(x => !x.feito);
+  const atras = tar.filter(x => x.data && x.data < t).sort((a, b) => a.data.localeCompare(b.data));
+  if (atras.length) add("alta", "alert", `${atras.length} tarefa${atras.length > 1 ? "s" : ""} atrasada${atras.length > 1 ? "s" : ""}`, atras.slice(0, 2).map(x => `${x.t} (${relDate(x.data).toLowerCase()})`).join(", ") + (atras.length > 2 ? "…" : ""), "#tarefas");
+  const hoje = tar.filter(x => x.data === t).sort((a, b) => (a.hora || "99").localeCompare(b.hora || "99") || prioN(a) - prioN(b));
+  const alta = hoje.filter(x => x.prio === "alta" || (x.hora && hm2m(x.hora) - nowMin() <= 120 && hm2m(x.hora) >= nowMin()));
+  alta.slice(0, 2).forEach(x => add("alta", "tarefas", x.t, [x.hora ? `às ${x.hora}` : "", x.prio === "alta" ? "prioridade alta" : ""].filter(Boolean).join(" · ") || "hoje", "#tarefas"));
+  /* prazos e pagamentos */
+  prazosOrd().filter(p => p.data && emDias(p.data) <= 7).forEach(p => { const n = emDias(p.data); add(n <= 1 ? "alta" : "media", "cal", `${p.nome}: ${n < 0 ? "passou o prazo" : n === 0 ? "termina hoje" : n === 1 ? "termina amanhã" : `faltam ${n} dias`}`, p.nota || longDate(p.data), "#tarefas"); });
+  fixosProximos(1).forEach(x => add("media", "gastos", `${x.f.desc} · ${eur(x.f.valor)}`, x.em === 0 ? "sai hoje" : "sai amanhã", "#gastos"));
+  subsAviso().filter(x => emDias(x.k) <= 1).forEach(({s, k}) => add("media", "repeat", `${s.nome} renova ${emDias(k) === 0 ? "hoje" : "amanhã"}`, `${eur(s.valor)} · se já não usas, cancela antes`, "#gastos"));
+  /* dinheiro */
+  const pd = porDia();
+  if (pd && pd.livre <= 0) add("alta", "alert", "Sem margem para gastos este mês", pd.pend.fixos ? `Ainda faltam ${eur(pd.pend.fixos)} de fixos e prestações` : "Já gastaste o disponível do mês", "#gastos");
+  else if (pd && pd.hoje && pd.resta < 0) add("media", "gastos", `Hoje já passaste ${eur(-pd.resta)} do valor diário`, `O valor por dia é ${eur(pd.dia)}`, "#gastos");
+  alertasOrc().filter(a => a.gasto > a.orc + .005).slice(0, 2).forEach(a => add("media", "alert", `${a.cat} passou o orçamento`, `${eur(a.gasto)} de ${eur0(a.orc)}`, "#gastos"));
+  acimaHabitual().slice(0, 1).forEach(x => add("info", "alert", `${x.cat} acima do habitual`, `${eur(x.v)} até hoje · habitual ${eur(x.med)}`, "#gastos"));
+  /* horário e treino */
+  const tr = conselhoTreino(t); if (tr) add(tr.nivel, "treino", tr.txt, tr.sub, "#treino");
+  const pt = proximoTurno(); if (pt && pt.k === t && !pt.agora && pt.ini - nowMin() <= 180) add("media", "horario", `Turno da ${SHIFT_NAME[pt.s]} às ${m2hm(pt.ini)}`, `daqui a ${dur(pt.ini - nowMin())} · sais às ${m2hm(pt.fim)}`, "#horario");
+  const conf = conflitosTurno(t); conf.forEach(c => add("media", "cal", c.txt, c.sub, "#horario"));
+  const inbox = live("inbox").filter(x => x.estado === "pendente").length;
+  if (inbox) add("media", "spark", `${inbox} registo${inbox > 1 ? "s" : ""} por confirmar`, "Entraram sozinhos (Apple Pay, Gmail, Atalhos)", "#hoje");
+  return out.sort((a, b) => a.ord - b.ord);
+}
+/* compromissos que caem dentro do turno */
+function conflitosTurno(k){
+  const s = shiftOf(k), r = isWork(s) && shiftRange(s); if (!r) return [];
+  return live("eventos").filter(e => e.data === k && e.hora).filter(e => { const a = hm2m(e.hora), b = a + (+e.dur || 60); return a < r[1] && b > r[0]; })
+    .map(e => ({txt:`${e.t} às ${e.hora} coincide com o turno`, sub:`Turno da ${SHIFT_NAME[s]} ${m2hm(r[0])}–${m2hm(r[1])}`}));
+}
+function prioridadesHtml(){
+  const ps = prioridadesHoje();
+  const lista = ps.slice(0, UI.prioTodas ? 20 : 5);
+  return `<section class="card prio" aria-label="Prioridades de hoje">
+    <div class="card-head"><h2>Prioridades de hoje</h2>${ps.length ? `<span class="xs muted">${ps.length} ${ps.length === 1 ? "ponto" : "pontos"}</span>` : ""}</div>
+    ${lista.length ? `<div class="list">${lista.map(p => `<a class="item prio-${p.nivel}" href="${p.href}" style="text-decoration:none;color:inherit"><span class="pico">${ic(p.ic, 18)}</span><div class="grow"><div class="t">${esc(p.txt)}</div>${p.sub ? `<div class="s">${esc(p.sub)}</div>` : ""}</div><span class="muted" aria-hidden="true">${ic("right", 16)}</span></a>`).join("")}</div>
+      ${ps.length > 5 ? `<button class="linkbtn" type="button" data-a="prio-todas">${UI.prioTodas ? "Mostrar menos" : `Ver mais ${ps.length - 5}`}</button>` : ""}`
+    : `<div class="empty">Nada urgente hoje: tarefas, pagamentos e orçamento em dia.</div>`}
+  </section>`;
+}
+/* indicadores do dia */
+function indicadoresHtml(){
+  const t = today(), m = ym(t), pd = porDia(), rs = resumoSemana(t), vm = vencOrc(t), pou = poupadoMes(m);
+  const hojeN = live("tarefas").filter(x => x.data === t), feitas = hojeN.filter(x => x.feito).length;
+  const pt = proximoTurno();
+  const k = [];
+  if (pd) k.push(`<a class="kpi" href="#gastos"><div class="l">Podes gastar hoje</div><div class="v" style="color:${pd.resta >= 0 ? "var(--green)" : "var(--red)"}">${pd.resta >= 0 ? eur(pd.resta) : "−" + eur(-pd.resta)}</div><div class="xs muted">${eur(pd.dia)} por dia</div></a>`);
+  k.push(`<a class="kpi" href="#tarefas"><div class="l">Tarefas de hoje</div><div class="v">${feitas}/${hojeN.length}</div><div class="xs muted">${hojeN.length ? "feitas" : "nenhuma marcada"}</div></a>`);
+  k.push(`<a class="kpi" href="#treino"><div class="l">Treinos da semana</div><div class="v">${rs.feitos}${rs.planeados ? "/" + rs.planeados : ""}</div><div class="xs muted">${rs.planeados ? "feitos / planeados" : "sem plano"}</div></a>`);
+  k.push(`<a class="kpi" href="#poupanca"><div class="l">Poupado este mês</div><div class="v">${eur0(pou)}</div><div class="xs muted">${vm && vm.liquido ? `${num(pou / vm.liquido * 100, 0)} % do vencimento` : "este mês"}</div></a>`);
+  if (pt) k.push(`<a class="kpi" href="#horario"><div class="l">${pt.agora ? "No turno" : "Próximo turno"}</div><div class="v">${pt.agora ? `até ${m2hm(pt.fim)}` : pt.k === t ? m2hm(pt.ini) : relDate(pt.k)}</div><div class="xs muted">${SHIFT_NAME[pt.s]}${pt.agora || pt.k === t ? "" : " · " + m2hm(pt.ini)}</div></a>`);
+  return `<section class="kpis ind" aria-label="Indicadores">${k.join("")}</section>`;
+}
+Object.assign(A, { "prio-todas": () => { UI.prioTodas = !UI.prioTodas; render(); } });
 
 /* ============================================================
    dia. — comando por voz e ligação Google
