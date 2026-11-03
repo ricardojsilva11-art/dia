@@ -474,6 +474,17 @@ a.kpi:hover{outline:2px solid var(--line)}
 .rel-l span:first-child{flex:1; min-width:140px}
 .rel-l .xs{flex-basis:100%; text-align:right; margin-top:-4px}
 
+/* v3.16 · tarefas */
+.tbtn{border:0; background:transparent; color:inherit; text-align:left; padding:0; font:inherit; cursor:pointer; min-width:0}
+.tcat{display:inline-block; padding:0 7px; margin-right:6px; border-radius:6px; background:var(--violet-soft); color:var(--violet-ink); font-weight:700; font-size:12px}
+.tfiltros{display:flex; flex-direction:column; gap:10px}
+.tsearch{display:flex; align-items:center; gap:8px; background:var(--card); border-radius:16px; padding:0 6px 0 14px; color:var(--muted)}
+.tsearch .input{border:0; background:transparent; height:44px; padding:0}
+.chips{display:flex; gap:6px; flex-wrap:wrap}
+.fchip{border:1.5px solid var(--line); background:var(--card); color:var(--ink); border-radius:999px; padding:6px 12px; font:inherit; font-size:13px; font-weight:700; cursor:pointer; min-height:36px}
+.fchip[aria-pressed="true"]{background:var(--ink); color:var(--bg); border-color:var(--ink)}
+.fchip[aria-pressed="true"] .muted{color:inherit; opacity:.7}
+
 </style>
 </head>
 <body>
@@ -501,7 +512,7 @@ a.kpi:hover{outline:2px solid var(--line)}
 /* ============================================================
    dia. — núcleo: dados, datas, sincronização, horário
    ============================================================ */
-const APP_VERSION = "3.15 · 03/11/2026";
+const APP_VERSION = "3.16 · 03/11/2026";
 const KEY = "dia-app-v1";
 const VENC_KEY = "vencimento-app-v1";
 const COLS = ["tarefas","eventos","gastos","fixos","refeicoes","agua","treinos","sessoes","inbox","turnos","saude","poupObj","poupMov","poupAuto","recorr","extras","creditos","credMov","prazos","assinaturas","receitas","cardio","corpo","invest","investMov"];
@@ -849,7 +860,7 @@ function parseQuick(txt){
     while (pdk(k).getDay() !== target) k = addDays(k, 1);
     data = k; return " ";
   });
-  t = t.replace(/\s(\d{1,2})\/(\d{1,2})(?:\/(\d{2,4}))?\s/, (_, d, m, y) => {
+  t = t.replace(/\s(?:(?:no |at[eé] (?:ao )?)?dia\s)?(\d{1,2})\/(\d{1,2})(?:\/(\d{2,4}))?\s/, (_, d, m, y) => {
     let yy = y ? +y : new Date().getFullYear(); if (yy < 100) yy += 2000;
     data = `${yy}-${pad(+m)}-${pad(+d)}`; return " ";
   });
@@ -1089,7 +1100,7 @@ function ensureRecorr(){
       if (!recorrCai(r, k)) continue;
       const id = `rc-${r.id}-${k}`;
       if (existe.has(id) || porSerie.has(r.id + "|" + k)) continue;
-      put("tarefas", {id, t:r.t, data:k, hora:r.hora || "", prio:r.prio || "media", tag:r.tag || "", serie:r.id, feito:false});
+      put("tarefas", {id, t:r.t, data:k, hora:r.hora || "", prio:r.prio || "media", tag:r.tag || "", cat:r.cat || "", serie:r.id, feito:false});
       existe.add(id); ch = true;
     }
   }
@@ -1136,7 +1147,7 @@ function parseRep(txt){
 }
 function serieFields(base, rep){
   const d = base.data || today();
-  return {t:base.t, hora:base.hora || "", prio:base.prio || "media", tag:base.tag || "", freq:rep.freq,
+  return {t:base.t, hora:base.hora || "", prio:base.prio || "media", tag:base.tag || "", cat:base.cat || "", freq:rep.freq,
     dias:rep.freq === "semanal" ? (rep.dias && rep.dias.length ? rep.dias : [pdk(d).getDay()]) : [],
     dia:rep.freq === "mensal" ? (+rep.dia || pdk(d).getDate()) : 0, mmdd:d.slice(5)};
 }
@@ -1398,6 +1409,7 @@ const IC = {
   creditos:'<path d="M3 10l9-6 9 6"/><path d="M5 10v8M9.5 10v8M14.5 10v8M19 10v8M3 20h18"/>',
   mais:'<circle cx="5" cy="12" r="1.6"/><circle cx="12" cy="12" r="1.6"/><circle cx="19" cy="12" r="1.6"/>',
   definicoes:'<circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/>',
+  search:'<circle cx="11" cy="11" r="7"/><path d="M20 20l-3.5-3.5"/>',
   cal:'<rect x="3" y="4" width="18" height="17" rx="2"/><path d="M3 9h18M8 2v4M16 2v4M8 14h3"/>'
 };
 const ic = (n, s = 20, sw = 2) => `<svg width="${s}" height="${s}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="${sw}" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${IC[n]}</svg>`;
@@ -1682,12 +1694,12 @@ function seriesCard(){
 }
 function taskRow(x, compact){
   const t = today(), late = x.data && x.data < t && !x.feito;
-  const sub = [x.data ? (late ? "Atrasada · " : "") + relDate(x.data) : "", x.hora, x.tag ? "#" + x.tag : "", x.serie ? "↻ " + (repTexto(byId("recorr", x.serie)) || "repete") : x.rep ? "repete " + {diaria:"todos os dias", semanal:"todas as semanas", mensal:"todos os meses"}[x.rep] : "", x.origem === "ia" ? "criada pela IA" : ""].filter(Boolean).join(" · ");
-  return `<div class="item ${x.feito ? "done" : ""}">
+  const sub = [x.data ? (late ? "Atrasada · " : "") + relDate(x.data) : "", x.hora, x.tag && x.tag !== x.cat ? "#" + x.tag : "", x.serie ? "↻ " + (repTexto(byId("recorr", x.serie)) || "repete") : x.rep ? "repete " + {diaria:"todos os dias", semanal:"todas as semanas", mensal:"todos os meses"}[x.rep] : "", x.origem === "ia" ? "criada pela IA" : ""].filter(Boolean).join(" · ");
+  return `<div class="item ${x.feito ? "done" : ""}" data-search="${esc(textoBusca(x))}">
     <input class="check" type="checkbox" data-c="task-done" data-id="${x.id}" ${x.feito ? "checked" : ""} aria-label="Concluir: ${esc(x.t)}">
-    <div class="grow"><div class="t">${esc(x.t)}</div>${sub ? `<div class="s" ${late ? 'style="color:var(--red)"' : ""}>${esc(sub)}</div>` : ""}</div>
+    <button type="button" class="grow tbtn" data-a="edit-tarefa" data-id="${x.id}" aria-label="Editar: ${esc(x.t)}"><div class="t">${esc(x.t)}</div>${sub || x.cat ? `<div class="s" ${late ? 'style="color:var(--red)"' : ""}>${x.cat ? `<span class="tcat">${esc(x.cat)}</span>` : ""}${esc(sub)}</div>` : ""}</button>
     ${compact ? "" : `${x.prio && x.prio !== "media" ? `<span class="chip c-${x.prio}">${x.prio === "alta" ? "Alta" : "Baixa"}</span>` : ""}
-    <button class="linkbtn" type="button" data-a="edit-tarefa" data-id="${x.id}">Editar</button>
+    ${!x.feito ? `<button class="linkbtn" type="button" data-a="adiar" data-id="${x.id}" title="Passar para ${!x.data || x.data <= today() ? "amanhã" : "o dia seguinte"}">Adiar</button>` : ""}
     <button class="x" type="button" data-a="del" data-col="tarefas" data-id="${x.id}" aria-label="Apagar tarefa">${ic("x", 16)}</button>`}
   </div>`;
 }
@@ -1702,20 +1714,19 @@ function vTarefas(){
   if (f === "dia") return head + `<div class="row"><div class="main-col">${tarefasCalendario()}</div>${side}</div>`;
   let body;
   if (f === "feitas"){
-    const done = all.filter(x => x.feito).sort((a, b) => (b.feitoEm || b.upd) - (a.feitoEm || a.upd)).slice(0, 60);
-    body = done.map(x => taskRow(x)).join("") || '<div class="empty">Ainda não concluíste tarefas.</div>';
+    body = historicoTarefasHtml();
   } else {
     /* nas tarefas que se repetem, mostra só a próxima vez (para não encher a lista) */
     const vistas = new Set();
     const open = all.filter(x => !x.feito).sort((a, b) => (a.data || "9999").localeCompare(b.data || "9999")).filter(x => { if (!x.serie || !x.data || x.data <= addDays(t, 1)) return true; if (vistas.has(x.serie)) return false; vistas.add(x.serie); return true; }).sort((a, b) => (a.data || "9999").localeCompare(b.data || "9999") || (a.hora || "99").localeCompare(b.hora || "99") || prioN(a) - prioN(b));
     const groups = [
-      ["Atrasadas", open.filter(x => x.data && x.data < t), "red"],
-      [`Hoje${isWork(shiftOf(t)) ? " · turno " + shiftOf(t) + " " + S.cfg.horas[shiftOf(t)].join("–") : ""}`, open.filter(x => x.data === t)],
-      [`Amanhã${isWork(shiftOf(addDays(t, 1))) ? " · turno " + shiftOf(addDays(t, 1)) + " " + S.cfg.horas[shiftOf(addDays(t, 1))].join("–") : ""}`, open.filter(x => x.data === addDays(t, 1))],
-      ["Próximos dias", open.filter(x => x.data && x.data > addDays(t, 1))],
-      ["Sem data", open.filter(x => !x.data)]
+      ["Atrasadas", open.filter(x => x.data && x.data < t && passaCat(x)), "red"],
+      [`Hoje${isWork(shiftOf(t)) ? " · turno " + shiftOf(t) + " " + S.cfg.horas[shiftOf(t)].join("–") : ""}`, open.filter(x => x.data === t && passaCat(x))],
+      [`Amanhã${isWork(shiftOf(addDays(t, 1))) ? " · turno " + shiftOf(addDays(t, 1)) + " " + S.cfg.horas[shiftOf(addDays(t, 1))].join("–") : ""}`, open.filter(x => x.data === addDays(t, 1) && passaCat(x))],
+      ["Próximos dias", open.filter(x => x.data && x.data > addDays(t, 1) && passaCat(x))],
+      ["Sem data", open.filter(x => !x.data && passaCat(x))]
     ];
-    body = groups.filter(g => g[1].length).map(g => `<h3 class="group-title ${g[2] || ""}">${esc(g[0])}</h3><div class="list">${g[1].map(x => taskRow(x)).join("")}</div>`).join("") || '<div class="empty">Sem tarefas por fazer. Escreve uma acima.</div>';
+    body = groups.filter(g => g[1].length).map(g => `<h3 class="group-title ${g[2] || ""}">${esc(g[0])}${g[2] === "red" && g[1].length > 1 ? ` <button class="linkbtn" type="button" data-a="adiar-atrasadas" style="margin-left:8px;text-transform:none;letter-spacing:0">Passar todas para hoje</button>` : ""}</h3><div class="list">${g[1].map(x => taskRow(x)).join("")}</div>`).join("") || '<div class="empty">Sem tarefas por fazer. Escreve uma acima.</div>';
   }
   return head + `
   <div class="row">
@@ -1725,7 +1736,8 @@ function vTarefas(){
         <input id="qt" name="q" placeholder="Nova tarefa… ex.: pagar luz amanhã 10h #casa !">
         <button class="btn" type="submit">Adicionar</button>
       </form>
-      <section class="card" style="gap:0">${body}</section>
+      ${filtrosTarefasHtml(f === "feitas" ? all.filter(x => x.feito) : all.filter(x => !x.feito))}
+      <section class="card" style="gap:0" id="tarefasBody">${body}<div class="empty tnone" hidden>Nenhuma tarefa encontrada.</div></section>
       ${seriesCard()}
       <p class="xs muted" style="margin:0">Dica: escreve «hoje», «amanhã», um dia da semana, uma data (12/11), uma hora (10h ou 10:30), #etiqueta e «!» para prioridade alta. Para repetir: «lixo todas as terças», «pagar luz todos os meses dia 8», «tomar vitaminas todos os dias 9h».</p>
     </div>
@@ -2402,11 +2414,12 @@ function dlgTarefa(x = {}){
     <fieldset class="field rep-w" style="border:0;padding:0;margin:0" ${freq === "semanal" ? "" : "hidden"}><legend style="margin-bottom:6px">Em que dias</legend><div style="display:flex;gap:6px;flex-wrap:wrap">${[1,2,3,4,5,6,0].map(d => `<label class="btn sm ghost" style="gap:6px"><input type="checkbox" name="rdias" value="${d}" ${dias.includes(d) ? "checked" : ""}> ${DOW3[d]}</label>`).join("")}</div></fieldset>
     <label class="field rep-m" ${freq === "mensal" ? "" : "hidden"}>Dia do mês<input name="rdia" inputmode="numeric" value="${esc((r && r.dia) || pdk(d0).getDate())}"></label>
     ${r && !r.del && !x._soSerie ? `<span class="xs muted">↻ Faz parte de uma tarefa que se repete (${esc(repTexto(r))}). As alterações ao texto, hora e repetição passam para as próximas vezes.</span>` : ""}
-    <label class="field">Etiqueta<input name="tag" value="${esc(x.tag || "")}" placeholder="casa, trabalho, finanças…"></label>`,
+    <div class="fields"><label class="field">Categoria<select name="cat">${opt([["", "Sem categoria"]].concat(TCATS().map(c => [c, c])), x.cat ?? (r && r.cat) ?? guessTCat(x.t, x.tag))}</select></label>
+    <label class="field">Etiqueta (opcional)<input name="tag" value="${esc(x.tag || "")}" placeholder="ex.: urgente"></label></div>`,
   o => {
     if (!o.t.trim()) throw new Error("Escreve a tarefa.");
     vData(o.data, "a data", true);
-    const base = {t:o.t.trim(), data:o.data, hora:o.hora, prio:o.prio, tag:o.tag.replace(/^#/, "").trim()};
+    const base = {t:o.t.trim(), data:o.data, hora:o.hora, prio:o.prio, tag:o.tag.replace(/^#/, "").trim(), cat:o.cat || ""};
     const rep = o.rep ? {freq:o.rep, dias:[].concat(o.rdias || []).map(Number), dia:Math.min(31, Math.max(1, Math.round(pnum(o.rdia)) || pdk(o.data || today()).getDate()))} : null;
     const temSerie = r && !r.del;
     if (x._soSerie){
@@ -2797,6 +2810,7 @@ document.addEventListener("submit", e => {
   e.preventDefault();
   const q = f.q.value.trim(); if (!q) return;
   const pr = parseRep(q), p = parseQuick(pr.txt); if (!p.t) return;
+  p.cat = guessTCat(p.t, p.tag) || (UI.tCat && UI.tCat !== "_" ? UI.tCat : "");
   if (pr.rep){ const s = criarSerie(p, pr.rep); save(); render(); toast(`«${p.t}» vai repetir ${repTexto(s)}.`); setTimeout(() => { const i = $("#qt"); if (i) i.focus(); }, 0); return; }
   if (!p.data && f.dataset.dia) p.data = f.dataset.dia;
   put("tarefas", Object.assign(p, {feito:false})); save(); render();
@@ -2831,6 +2845,7 @@ function boot(){
   copiaVersao();
   let ch = readVencLocal();
   ch = migrarRep() || ch;
+  ch = migrarCats() || ch;
   ch = ensureRecorr() || ch;
   ch = applyFixos() || ch;
   ch = applyPoupAuto() || ch;
@@ -4072,6 +4087,72 @@ Object.assign(A, {
   "rel-per": el => dlgRelatorio(el.dataset.v),
   "rel-mv": el => { const n = +el.dataset.v; dlgRelatorio(UI.relPer, UI.relPer === "mes" ? mesAnt(ym(UI.relRef), -n) + "-01" : addDays(UI.relRef, 7 * n)); },
   "ir-rel": el => { $("#dlg").close("cancel"); location.hash = el.getAttribute("href"); }
+});
+
+/* ============================================================
+   dia. — TAREFAS: categorias, pesquisa, histórico e edição rápida
+   ============================================================ */
+function TCATS(){ const c = S.cfg.tarefaCats; return Array.isArray(c) && c.length ? c : ["Casa","Trabalho","Finanças","Saúde","Carro","Compras","Pessoal"]; }
+function TCAT_HINTS(){ return [
+  ["Finanças", /pagar|fatura|factura|banco|irs|iuc|seguro|imposto|transfer|recibo|renda|multa|finan/i],
+  ["Saúde", /m[eé]dic|consulta|dentist|farm[aá]cia|an[aá]lise|exame|vacina|sa[uú]de|hospital|gin[aá]sio/i],
+  ["Carro", /carro|inspe[cç]|revis[aã]o|pneu|[oó]leo|oficina|gas[oó]leo|via verde/i],
+  ["Compras", /comprar|compras|supermercado|encomenda|devolver/i],
+  ["Casa", /casa|lixo|limpar|lavar|arrumar|reparar|canaliz|eletric|condom[ií]nio|plantas|roupa/i],
+  ["Trabalho", /trabalho|escala|turno|reuni[aã]o|email|relat[oó]rio|chefe|colega/i]
+]; }
+function guessTCat(txt, tag){
+  const cs = TCATS(), n = s => String(s || "").toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g, "");
+  if (tag){ const m = cs.find(c => n(c) === n(tag)); if (m) return m; }
+  for (const [c, re] of TCAT_HINTS()) if (cs.includes(c) && re.test(txt || "")) return c;
+  return "";
+}
+/* uma vez: as etiquetas que coincidem com uma categoria passam a ser a categoria */
+function migrarCats(){
+  if (S.local.catsMigr) return false;
+  let ch = false;
+  S.tarefas.filter(x => !x.del && !x.cat && x.tag).forEach(x => { const c = guessTCat("", x.tag); if (c){ x.cat = c; ch = true; } });
+  S.local.catsMigr = 1; persist();
+  return ch;
+}
+/* adiar: atrasadas e de hoje passam para amanhã; as outras, um dia */
+function adiar(id, dias = 1){
+  const x = byId("tarefas", id); if (!x) return;
+  const t = today(), base = !x.data || x.data <= t ? t : x.data;
+  put("tarefas", {id, data:addDays(base, dias)});
+}
+function filtrosTarefasHtml(lista){
+  const cs = TCATS(), sel = UI.tCat || "";
+  const n = c => lista.filter(x => (c === "_" ? !x.cat : x.cat === c)).length;
+  return `<div class="tfiltros">
+    <label class="tsearch">${ic("search", 18)}<span class="sr">Pesquisar tarefas</span><input id="tsearch" class="input" type="search" placeholder="Pesquisar…" value="${esc(UI.tq || "")}" autocomplete="off"></label>
+    <div class="chips" role="group" aria-label="Categorias"><button type="button" class="fchip" data-a="tcat" data-v="" aria-pressed="${!sel}">Todas</button>${cs.map(c => n(c) ? `<button type="button" class="fchip" data-a="tcat" data-v="${esc(c)}" aria-pressed="${sel === c}">${esc(c)} <span class="muted">${n(c)}</span></button>` : "").join("")}${n("_") && lista.some(x => x.cat) ? `<button type="button" class="fchip" data-a="tcat" data-v="_" aria-pressed="${sel === "_"}">Sem categoria <span class="muted">${n("_")}</span></button>` : ""}</div>
+  </div>`;
+}
+function passaCat(x){ return !UI.tCat || (UI.tCat === "_" ? !x.cat : x.cat === UI.tCat); }
+function textoBusca(x){ return [x.t, x.cat, x.tag, x.data && longDate(x.data)].filter(Boolean).join(" ").toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g, ""); }
+/* histórico das concluídas, por mês */
+function historicoTarefasHtml(){
+  const done = live("tarefas").filter(x => x.feito && passaCat(x)).sort((a, b) => (b.feitoEm || b.upd) - (a.feitoEm || a.upd)).slice(0, 400);
+  if (!done.length) return '<div class="empty">Ainda não concluíste tarefas.</div>';
+  const grupos = {};
+  done.forEach(x => { const m = ym(dk(new Date(x.feitoEm || x.upd))); (grupos[m] = grupos[m] || []).push(x); });
+  return Object.keys(grupos).map(m => `<h3 class="group-title" data-grp>${MESES[+m.slice(5) - 1]} ${m.slice(0, 4)} · ${grupos[m].length}</h3><div class="list">${grupos[m].map(x => taskRow(x)).join("")}</div>`).join("");
+}
+/* pesquisa sem redesenhar a página (o teclado não fecha) */
+document.addEventListener("input", e => {
+  if (e.target.id !== "tsearch") return;
+  UI.tq = e.target.value;
+  const q = e.target.value.toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g, "").trim();
+  const box = document.querySelector("#tarefasBody"); if (!box) return;
+  box.querySelectorAll(".item[data-search]").forEach(el => el.hidden = !!q && !el.dataset.search.includes(q));
+  box.querySelectorAll(".list").forEach(l => { const vis = [...l.querySelectorAll(".item[data-search]")].some(i => !i.hidden); l.hidden = !vis; const h = l.previousElementSibling; if (h && h.classList.contains("group-title")) h.hidden = !vis; });
+  const vazio = box.querySelector(".tnone"); if (vazio) vazio.hidden = !q || [...box.querySelectorAll(".item[data-search]")].some(i => !i.hidden);
+});
+Object.assign(A, {
+  "tcat": el => { UI.tCat = el.dataset.v; render(); },
+  "adiar": el => { adiar(el.dataset.id); save(); render(); toast("Adiada para " + relDate(byId("tarefas", el.dataset.id).data).toLowerCase() + "."); },
+  "adiar-atrasadas": () => { const t = today(), l = live("tarefas").filter(x => !x.feito && x.data && x.data < t); l.forEach(x => put("tarefas", {id:x.id, data:t})); save(); render(); toast(`${l.length} tarefa${l.length > 1 ? "s passaram" : " passou"} para hoje.`); }
 });
 
 /* ============================================================
