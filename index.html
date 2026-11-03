@@ -481,10 +481,10 @@ a.kpi:hover{outline:2px solid var(--line)}
 /* ============================================================
    dia. — núcleo: dados, datas, sincronização, horário
    ============================================================ */
-const APP_VERSION = "3.11 · 03/11/2026";
+const APP_VERSION = "3.12 · 03/11/2026";
 const KEY = "dia-app-v1";
 const VENC_KEY = "vencimento-app-v1";
-const COLS = ["tarefas","eventos","gastos","fixos","refeicoes","agua","treinos","sessoes","inbox","turnos","saude","poupObj","poupMov","poupAuto","recorr","extras","creditos","credMov","prazos","assinaturas","receitas"];
+const COLS = ["tarefas","eventos","gastos","fixos","refeicoes","agua","treinos","sessoes","inbox","turnos","saude","poupObj","poupMov","poupAuto","recorr","extras","creditos","credMov","prazos","assinaturas","receitas","cardio","corpo"];
 const DOW = ["Domingo","Segunda","Terça","Quarta","Quinta","Sexta","Sábado"];
 const DOW3 = ["Dom","Seg","Ter","Qua","Qui","Sex","Sáb"];
 const MESES = ["janeiro","fevereiro","março","abril","maio","junho","julho","agosto","setembro","outubro","novembro","dezembro"];
@@ -1338,7 +1338,7 @@ function folhasExcel(){
       sets.forEach((v, j) => { if (v == null || v === "") return; tr.push([{d:s.data}, p.nome, e.n, j + 1, pnum(reps[j]) || reps[j] || "", +v, s.feito ? "Sim" : ""]); });
     });
   });
-  return [{nome:"Gastos", rows:g, widths:[12, 32, 18, 12, 14]}, {nome:"Gastos por mês", rows:gm, widths:[10, 20, 12, 12]}, {nome:"Treinos", rows:tr, widths:[12, 24, 26, 7, 11, 8, 11]}, receitasFolha(), credFolha()].filter(Boolean);
+  return [{nome:"Gastos", rows:g, widths:[12, 32, 18, 12, 14]}, {nome:"Gastos por mês", rows:gm, widths:[10, 20, 12, 12]}, {nome:"Treinos", rows:tr, widths:[12, 24, 26, 7, 11, 8, 11]}, receitasFolha(), ...cardioFolha(), credFolha()].filter(Boolean);
 }
 function exportarExcel(){
   const blob = xlsxBlob(folhasExcel());
@@ -1451,6 +1451,7 @@ function itemTitle(it){
   switch (it.tipo){
     case "gasto": return `${it.desc || "Gasto"} · ${eur(it.valor)}`;
     case "receita": return `Receita: ${it.desc || "entrada de dinheiro"} · +${eur(it.valor)}`;
+    case "cardio": return `${it.tipo_c || "Cardio"}${+it.km ? " · " + num(it.km, 2) + " km" : ""}${+it.min ? " · " + durTxt(it.min) : ""}`;
     case "tarefa": return it.t || "Tarefa";
     case "evento": return it.t || "Compromisso";
     case "refeicao": return `${it.desc || it.tipo_ref || "Refeição"} · ${Math.round(+it.kcal || 0)} kcal`;
@@ -1892,7 +1893,7 @@ function vTreino(){
   const nTreinos = live("sessoes").filter(s => s.feito && ym(s.data) === ym(t)).length;
   return `
   <div class="page-head"><div><p>${plano.length} treino${plano.length === 1 ? "" : "s"} no plano · ${nTreinos} feito${nTreinos === 1 ? "" : "s"} este mês</p><h1>Treino</h1></div>
-    <div style="display:flex;gap:8px;flex-wrap:wrap">${plano.length ? "" : '<button class="btn ghost" type="button" data-a="plano-exemplo">Usar plano de exemplo</button>'}<button class="btn" type="button" data-a="edit-treino">+ Novo treino</button></div></div>
+    <div style="display:flex;gap:8px;flex-wrap:wrap">${plano.length ? "" : '<button class="btn ghost" type="button" data-a="plano-exemplo">Usar plano de exemplo</button>'}<button class="btn ghost" type="button" data-a="add-cardio">+ Cardio</button><button class="btn" type="button" data-a="edit-treino">+ Novo treino</button></div></div>
   <section class="card"><div class="card-head"><h2>Semana ajustada ao horário</h2><span class="xs muted">Nos dias de noite (N) aparece a sugestão de treino leve</span></div><div class="week">${week}</div></section>
   <div class="row">
     <div class="main-col">
@@ -1907,13 +1908,14 @@ function vTreino(){
         <div class="card-head"><h2>Evolução por treino</h2>${plano.length ? `<select class="input" style="width:auto;max-width:100%;height:38px" aria-label="Treino" data-c="evo-sel">${plano.map(p => `<option value="${p.id}" ${evo && p.id === evo.id ? "selected" : ""}>${esc(p.nome)}</option>`).join("")}</select>` : ""}</div>
         ${prog || '<div class="empty">Cria um treino para veres a evolução.</div>'}
       </section>
+      ${evolucaoGeralCard()}
       <section class="card">
         <h2>O meu plano</h2>
         <div class="list">${plano.map(p => `<div class="item"><div class="grow"><div class="t">${esc(p.nome)}</div><div class="s">${(p.dias || []).map(d => DOW3[d]).join(", ") || "sem dias"} · ${esc(p.hora || S.cfg.treinoHora)} · ${(p.ex || []).map(e => esc(e.n)).join(", ")}</div></div>
           <button class="linkbtn" type="button" data-a="edit-treino" data-id="${p.id}">Editar</button><button class="x" type="button" data-a="del" data-col="treinos" data-id="${p.id}" aria-label="Apagar treino">${ic("x", 16)}</button></div>`).join("") || '<div class="empty">Sem treinos. Cria um, usa o plano de exemplo ou arrasta o plano do teu PT para a IA.</div>'}</div>
       </section>
     </div>
-    <div class="side-col">${aiCard("treino", "Lê planos de treino e cria-os no teu plano", "Plano do PT em PDF, fotos, folhas")}</div>
+    <div class="side-col">${cardioCard()}${corpoCard()}${aiCard("treino", "Lê planos de treino e cria-os no teu plano", "Plano do PT em PDF, fotos, folhas")}</div>
   </div>`;
 }
 
@@ -2587,6 +2589,7 @@ async function aiFiles(files, sec){
 function applyItem(it, origem = "ia"){
   const t = today(); let r = null;
   switch (it.tipo){
+    case "cardio": { const min = pnum(it.min), km = pnum(it.km); if (min || km) r = ["cardio", put("cardio", {tipo:CARDIO_TIPOS().includes(it.tipo_c) ? it.tipo_c : "Corrida", data:it.data || t, km, min, kcal:0, fc:0, nota:""})]; break; }
     case "receita": { const v = Math.abs(pnum(it.valor)); if (v) r = ["receitas", put("receitas", {data:it.data || t, valor:v, desc:String(it.desc || "").trim(), cat:RECEITA_CATS().includes(it.cat) ? it.cat : "Outros", origem})]; break; }
     case "gasto": r = ["gastos", put("gastos", {data:it.data || t, valor:pnum(it.valor), desc:String(it.desc || "").trim(), cat:cats().includes(it.cat) ? it.cat : guessCat(it.desc), origem})]; break;
     case "tarefa": if (["diaria","semanal","mensal","anual"].includes(it.repete)){ const sr = criarSerie({t:it.t || "Tarefa", data:it.data || "", hora:it.hora || "", prio:["alta","media","baixa"].includes(it.prio) ? it.prio : "media", tag:it.tag || ""}, {freq:it.repete, dias:(it.dias || []).map(Number), dia:+it.dia || 0}); r = ["recorr", sr]; break; }
@@ -3504,12 +3507,181 @@ function indicadoresHtml(){
   const k = [];
   if (pd) k.push(`<a class="kpi" href="#gastos"><div class="l">Podes gastar hoje</div><div class="v" style="color:${pd.resta >= 0 ? "var(--green)" : "var(--red)"}">${pd.resta >= 0 ? eur(pd.resta) : "−" + eur(-pd.resta)}</div><div class="xs muted">${eur(pd.dia)} por dia</div></a>`);
   k.push(`<a class="kpi" href="#tarefas"><div class="l">Tarefas de hoje</div><div class="v">${feitas}/${hojeN.length}</div><div class="xs muted">${hojeN.length ? "feitas" : "nenhuma marcada"}</div></a>`);
-  k.push(`<a class="kpi" href="#treino"><div class="l">Treinos da semana</div><div class="v">${rs.feitos}${rs.planeados ? "/" + rs.planeados : ""}</div><div class="xs muted">${rs.planeados ? "feitos / planeados" : "sem plano"}</div></a>`);
+  k.push(`<a class="kpi" href="#treino"><div class="l">Treinos da semana</div><div class="v">${rs.feitos}${rs.planeados ? "/" + rs.planeados : ""}</div><div class="xs muted">${rs.planeados ? "feitos / planeados" : "sem plano"}${(() => { const n = live("cardio").filter(c => c.data >= rs.seg && c.data <= rs.dom).length; return n ? ` · + ${n} cardio` : ""; })()}</div></a>`);
   k.push(`<a class="kpi" href="#poupanca"><div class="l">Poupado este mês</div><div class="v">${eur0(pou)}</div><div class="xs muted">${vm && vm.liquido ? `${num(pou / vm.liquido * 100, 0)} % do vencimento` : "este mês"}</div></a>`);
   if (pt) k.push(`<a class="kpi" href="#horario"><div class="l">${pt.agora ? "No turno" : "Próximo turno"}</div><div class="v">${pt.agora ? `até ${m2hm(pt.fim)}` : pt.k === t ? m2hm(pt.ini) : relDate(pt.k)}</div><div class="xs muted">${SHIFT_NAME[pt.s]}${pt.agora || pt.k === t ? "" : " · " + m2hm(pt.ini)}</div></a>`);
   return `<section class="kpis ind" aria-label="Indicadores">${k.join("")}</section>`;
 }
 Object.assign(A, { "prio-todas": () => { UI.prioTodas = !UI.prioTodas; render(); } });
+
+/* ============================================================
+   dia. — TREINO: cardio e corrida, peso e composição corporal,
+   evolução semanal e mensal
+   ============================================================ */
+function CARDIO_TIPOS(){ return ["Corrida","Caminhada","Bicicleta","Natação","Remo","Elíptica","Outro"]; }
+function cardioOrd(){ return live("cardio").slice().sort((a, b) => b.data.localeCompare(a.data) || (b.upd || 0) - (a.upd || 0)); }
+/* ritmo em min/km (corrida, caminhada) ou velocidade em km/h (restantes) */
+function ritmoTxt(c){
+  const km = +c.km || 0, min = +c.min || 0; if (!km || !min) return "";
+  if (c.tipo === "Corrida" || c.tipo === "Caminhada"){ const p = min / km, m = Math.floor(p), s = Math.round((p - m) * 60); return `${m}:${pad(s === 60 ? 0 : s)} /km`; }
+  return `${num(km / (min / 60), 1)} km/h`;
+}
+const durTxt = min => { min = Math.round(+min || 0); const h = Math.floor(min / 60), m = min % 60; return h ? `${h} h ${pad(m)}` : `${m} min`; };
+function dlgCardio(c = {}){
+  openDlg(c.id ? "Editar cardio" : "Registar cardio", `<div class="fields"><label class="field">Tipo<select name="tipo">${opt(CARDIO_TIPOS(), c.tipo || "Corrida")}</select></label>
+    <label class="field">Data<input type="date" name="data" required value="${esc(c.data || diaSel())}"></label></div>
+    <div class="fields"><label class="field">Distância (km)<input name="km" inputmode="decimal" value="${c.km ? esc(num(c.km, 2)) : ""}" placeholder="Ex.: 5"></label>
+    <label class="field">Duração (min)<input name="min" inputmode="decimal" required value="${c.min ? esc(num(c.min, 1)) : ""}" placeholder="Ex.: 28"></label></div>
+    <div class="fields"><label class="field">Calorias (opcional)<input name="kcal" inputmode="numeric" value="${c.kcal ? esc(c.kcal) : ""}"></label>
+    <label class="field">FC média (opcional)<input name="fc" inputmode="numeric" value="${c.fc ? esc(c.fc) : ""}" placeholder="bpm"></label></div>
+    <label class="field">Nota (opcional)<input name="nota" value="${esc(c.nota || "")}" placeholder="Ex.: treino de séries, trilho"></label>`,
+  o => {
+    const data = vData(o.data), min = vNum(o.min, "a duração", {min:1, max:1440}), km = vNum(o.km, "a distância", {opc:true, min:0, max:500});
+    const kcal = vNum(o.kcal, "as calorias", {opc:true, min:0, max:10000}), fc = vNum(o.fc, "a frequência cardíaca", {opc:true, min:0, max:240});
+    if (km && (o.tipo === "Corrida" || o.tipo === "Caminhada") && min / km < 2) throw new Error("Esse ritmo é demasiado rápido: confirma a distância e a duração.");
+    put("cardio", {id:c.id, tipo:o.tipo, data, km, min, kcal:Math.round(kcal), fc:Math.round(fc), nota:o.nota.trim()}); save(); render(); toast("Cardio registado.");
+  }, "Guardar", c.id ? `<button class="btn danger" type="button" data-a="del-cardio" data-id="${c.id}" style="margin-right:auto">Apagar</button>` : "");
+}
+function recordesCardio(){
+  const cs = live("cardio"), corr = cs.filter(c => c.tipo === "Corrida" && +c.km > 0 && +c.min > 0);
+  const longa = cs.filter(c => +c.km > 0).sort((a, b) => b.km - a.km)[0];
+  const rapida = corr.filter(c => c.km >= 3).sort((a, b) => a.min / a.km - b.min / b.km)[0];
+  return {longa, rapida};
+}
+function cardioCard(){
+  const cs = cardioOrd(), t = today(), seg = addDays(t, -((pdk(t).getDay() + 6) % 7));
+  const sem = cs.filter(c => c.data >= seg && c.data <= t), mes = cs.filter(c => ym(c.data) === ym(t));
+  const kmS = sem.reduce((a, c) => a + (+c.km || 0), 0), minS = sem.reduce((a, c) => a + (+c.min || 0), 0), kmM = mes.reduce((a, c) => a + (+c.km || 0), 0);
+  const rec = recordesCardio();
+  return `<section class="card" aria-label="Cardio">
+    <div class="card-head"><h2>Cardio e corrida</h2><button class="btn sm" type="button" data-a="add-cardio">+ Registar</button></div>
+    ${cs.length ? `<div style="display:flex;gap:18px;flex-wrap:wrap">
+      <div><div class="xs muted" style="font-weight:700">Esta semana</div><div class="mid">${num(kmS, 1)} km</div><div class="xs muted">${durTxt(minS)} · ${sem.length} sessõ${sem.length === 1 ? "ão" : "es"}</div></div>
+      <div><div class="xs muted" style="font-weight:700">Este mês</div><div class="mid">${num(kmM, 1)} km</div><div class="xs muted">${mes.length} sessõ${mes.length === 1 ? "ão" : "es"}</div></div></div>
+      ${rec.longa || rec.rapida ? `<div class="small">${rec.longa ? `🏅 Maior distância: <b>${num(rec.longa.km, 1)} km</b> (${esc(rec.longa.tipo.toLowerCase())}, ${shortDate(rec.longa.data)})` : ""}${rec.rapida ? `<br>🏅 Melhor ritmo a correr (3 km ou mais): <b>${ritmoTxt(rec.rapida)}</b> em ${num(rec.rapida.km, 1)} km` : ""}</div>` : ""}
+      <div class="list">${cs.slice(0, 5).map(c => `<div class="item"><div class="grow"><div class="t">${esc(c.tipo)}${+c.km ? ` · ${num(c.km, 2)} km` : ""}</div><div class="s">${relDate(c.data)} · ${durTxt(c.min)}${ritmoTxt(c) ? " · " + ritmoTxt(c) : ""}${c.fc ? ` · ${c.fc} bpm` : ""}${c.nota ? " · " + esc(c.nota) : ""}</div></div><button class="linkbtn" type="button" data-a="edit-cardio" data-id="${c.id}">Editar</button></div>`).join("")}</div>`
+    : '<div class="empty">Corrida, caminhada, bicicleta… regista distância e duração e a app calcula o ritmo e guarda os recordes.</div>'}
+  </section>`;
+}
+
+/* ---------- peso e composição corporal ---------- */
+/* medições: as registadas aqui e o peso que chega do Apple Saúde */
+function medicoes(){
+  const m = new Map();
+  live("saude").filter(x => +x.peso > 0).forEach(x => m.set(x.id, {data:x.id, peso:+x.peso, fonte:"saude"}));
+  live("corpo").forEach(x => m.set(x.data, Object.assign({}, m.get(x.data) || {}, {data:x.data, id:x.id, peso:+x.peso || (m.get(x.data) || {}).peso, gordura:+x.gordura || null, musculo:+x.musculo || null, cintura:+x.cintura || null, fonte:"app"})));
+  return [...m.values()].filter(x => x.peso > 0).sort((a, b) => a.data.localeCompare(b.data));
+}
+function dlgCorpo(x = {}){
+  const o0 = S.cfg.objCorpo || {};
+  openDlg("Peso e composição", `<div class="fields"><label class="field">Data<input type="date" name="data" required value="${esc(x.data || today())}"></label>
+    <label class="field">Peso (kg)<input name="peso" inputmode="decimal" required value="${x.peso ? esc(num(x.peso, 1)) : ""}"></label></div>
+    <div class="fields"><label class="field">Gordura (%)<input name="gordura" inputmode="decimal" value="${x.gordura ? esc(num(x.gordura, 1)) : ""}" placeholder="Opcional"></label>
+    <label class="field">Massa muscular (kg)<input name="musculo" inputmode="decimal" value="${x.musculo ? esc(num(x.musculo, 1)) : ""}" placeholder="Opcional"></label>
+    <label class="field">Cintura (cm)<input name="cintura" inputmode="decimal" value="${x.cintura ? esc(num(x.cintura, 1)) : ""}" placeholder="Opcional"></label></div>
+    <div class="small" style="font-weight:800;margin-top:4px">Objetivo</div>
+    <div class="fields"><label class="field">Peso objetivo (kg)<input name="alvo" inputmode="decimal" value="${o0.peso ? esc(num(o0.peso, 1)) : ""}" placeholder="Opcional"></label>
+    <label class="field">Gordura objetivo (%)<input name="alvoG" inputmode="decimal" value="${o0.gordura ? esc(num(o0.gordura, 1)) : ""}" placeholder="Opcional"></label>
+    <label class="field">Até<input type="date" name="ate" value="${esc(o0.data || "")}"></label></div>`,
+  o => {
+    const data = vData(o.data), peso = vNum(o.peso, "o peso", {min:20, max:400});
+    const g = vNum(o.gordura, "a gordura", {opc:true, min:0, max:70}), mu = vNum(o.musculo, "a massa muscular", {opc:true, min:0, max:200}), ci = vNum(o.cintura, "a cintura", {opc:true, min:0, max:250});
+    const alvo = vNum(o.alvo, "o peso objetivo", {opc:true, min:0, max:400}), alvoG = vNum(o.alvoG, "a gordura objetivo", {opc:true, min:0, max:70}); vData(o.ate, "a data do objetivo", true);
+    const ex = live("corpo").find(c => c.data === data);
+    put("corpo", {id:ex ? ex.id : x.id, data, peso, gordura:g || null, musculo:mu || null, cintura:ci || null});
+    const novo = {peso:alvo || 0, gordura:alvoG || 0, data:o.ate || ""};
+    if (JSON.stringify(novo) !== JSON.stringify({peso:o0.peso || 0, gordura:o0.gordura || 0, data:o0.data || ""})) setCfg({objCorpo:novo});
+    save(); render(); toast("Medição guardada.");
+  });
+}
+function linhaPeso(ms, alvo){
+  if (ms.length < 2) return "";
+  const W = Math.round(Math.max(260, Math.min(520, (window.innerWidth < 761 ? window.innerWidth - 80 : 420)))), H = 150, L = 34, R = 10, T = 10, B = 22, pw = W - L - R, ph = H - T - B;
+  const vs = ms.map(m => m.peso).concat(alvo ? [alvo] : []), lo = Math.floor(Math.min(...vs) - 1), hi = Math.ceil(Math.max(...vs) + 1);
+  const x0 = pdk(ms[0].data).getTime(), x1 = Math.max(x0 + 864e5, pdk(ms[ms.length - 1].data).getTime());
+  const X = d => L + (pdk(d).getTime() - x0) / (x1 - x0) * pw, Y = v => T + ph - (v - lo) / (hi - lo) * ph;
+  const step = hi - lo > 12 ? 5 : hi - lo > 5 ? 2 : 1, ticks = []; for (let v = Math.ceil(lo / step) * step; v <= hi; v += step) ticks.push(v);
+  return `<svg class="lchart" viewBox="0 0 ${W} ${H}" width="${W}" height="${H}" role="img" aria-label="Evolução do peso">
+    <g class="grid">${ticks.map(v => `<line x1="${L}" x2="${L + pw}" y1="${Y(v)}" y2="${Y(v)}"/><text x="${L - 5}" y="${Y(v) + 4}" text-anchor="end">${v}</text>`).join("")}</g>
+    ${alvo ? `<line x1="${L}" x2="${L + pw}" y1="${Y(alvo)}" y2="${Y(alvo)}" stroke="var(--s3)" stroke-dasharray="5 4" stroke-width="1.5"/><text x="${L + pw}" y="${Y(alvo) - 4}" text-anchor="end" style="fill:var(--s3)">objetivo ${num(alvo, 1)}</text>` : ""}
+    <polyline fill="none" stroke="var(--s1)" stroke-width="2.2" stroke-linejoin="round" points="${ms.map(m => `${X(m.data).toFixed(1)},${Y(m.peso).toFixed(1)}`).join(" ")}"/>
+    ${ms.map(m => `<circle class="hit" cx="${X(m.data)}" cy="${Y(m.peso)}" r="10"><title>${shortDate(m.data)}: ${num(m.peso, 1)} kg${m.gordura ? ` · ${num(m.gordura, 1)} % gordura` : ""}</title></circle>`).join("")}
+    <circle cx="${X(ms[ms.length - 1].data)}" cy="${Y(ms[ms.length - 1].peso)}" r="4.5" fill="var(--s1)"/>
+    <text x="${L}" y="${H - 5}" class="xl">${shortDate(ms[0].data)}</text><text x="${L + pw}" y="${H - 5}" text-anchor="end" class="xl">${shortDate(ms[ms.length - 1].data)}</text>
+  </svg>`;
+}
+function corpoCard(){
+  const ms = medicoes(), o = S.cfg.objCorpo || {}, u = ms[ms.length - 1];
+  const ref = u && ms.filter(m => m.data <= addDays(u.data, -28)).pop();
+  const dif = ref ? r2(u.peso - ref.peso) : null;
+  let prog = "";
+  if (u && +o.peso){
+    const ini = ms[0].peso, falta = r2(u.peso - o.peso), tot = ini - o.peso, p = tot ? Math.max(0, Math.min(100, (ini - u.peso) / tot * 100)) : 100;
+    const sem = o.data ? Math.max(1, (pdk(o.data) - pdk(today())) / (7 * 864e5)) : null;
+    prog = `<div class="small" style="display:flex;justify-content:space-between;gap:8px;flex-wrap:wrap"><b>Objetivo ${num(o.peso, 1)} kg</b><span class="muted">${Math.abs(falta) < .05 ? "atingido 🎉" : `faltam ${num(Math.abs(falta), 1)} kg${sem ? ` · ${num(Math.abs(falta) / sem, 2)} kg por semana até ${shortDate(o.data)}` : ""}`}</span></div>
+      <div class="bar"><i style="width:${p.toFixed(0)}%;background:var(--s3)"></i></div>`;
+  }
+  const gs = ms.filter(m => m.gordura), ug = gs[gs.length - 1];
+  return `<section class="card" aria-label="Peso e composição">
+    <div class="card-head"><h2>Peso e composição</h2><button class="btn sm" type="button" data-a="add-corpo">+ Medição</button></div>
+    ${u ? `<div style="display:flex;gap:18px;flex-wrap:wrap;align-items:baseline">
+      <div><div class="xs muted" style="font-weight:700">Peso</div><div class="mid">${num(u.peso, 1)} kg</div><div class="xs muted">${relDate(u.data)}${u.fonte === "saude" ? " · Apple Saúde" : ""}</div></div>
+      ${dif != null ? `<div><div class="xs muted" style="font-weight:700">Últimos 30 dias</div><div class="mid" style="color:${dif < 0 ? "var(--green)" : dif > 0 ? "var(--amber-ink)" : "inherit"}">${dif > 0 ? "+" : dif < 0 ? "−" : ""}${num(Math.abs(dif), 1)} kg</div></div>` : ""}
+      ${ug ? `<div><div class="xs muted" style="font-weight:700">Gordura</div><div class="mid">${num(ug.gordura, 1)} %</div>${+o.gordura ? `<div class="xs muted">objetivo ${num(o.gordura, 1)} %</div>` : ""}</div>` : ""}
+      ${u.musculo ? `<div><div class="xs muted" style="font-weight:700">Músculo</div><div class="mid">${num(u.musculo, 1)} kg</div></div>` : ""}
+    </div>
+    ${prog}
+    <div style="overflow-x:auto">${linhaPeso(ms.slice(-60), +o.peso || 0)}</div>`
+    : '<div class="empty">Regista o peso (e, se quiseres, gordura e cintura) e define um objetivo. O peso do Apple Saúde também aparece aqui.</div>'}
+  </section>`;
+}
+
+/* ---------- evolução semanal e mensal ---------- */
+function volumeSessao(ss){
+  const p = byId("treinos", ss.treinoId); if (!p) return 0;
+  return (p.ex || []).reduce((tot, e, i) => {
+    const reps = repsSeries(e).map(r => pnum(r) || 0), sets = ss.sets && ss.sets[i] && ss.sets[i].some(v => v != null && v !== "") ? ss.sets[i] : (ss.kg && ss.kg[i] != null && ss.kg[i] !== "" ? reps.map(() => ss.kg[i]) : []);
+    return tot + sets.reduce((a, v, j) => a + (pnum(v) || 0) * (reps[j] || reps[reps.length - 1] || 0), 0);
+  }, 0);
+}
+function evolucaoGeralCard(){
+  const per = UI.evoPer === "mes" ? "mes" : "sem", met = UI.evoMet || "treinos", t = today();
+  const grupos = per === "sem"
+    ? Array.from({length:8}, (_, i) => { const seg = addDays(t, -((pdk(t).getDay() + 6) % 7) - 7 * (7 - i)); return {de:seg, ate:addDays(seg, 6), lab:`${pdk(seg).getDate()}/${pdk(seg).getMonth() + 1}`}; })
+    : Array.from({length:6}, (_, i) => { const m = mesAnt(ym(t), 5 - i); return {de:m + "-01", ate:`${m}-${pad(diasNoMes(m))}`, lab:MESES[+m.slice(5) - 1].slice(0, 3)}; });
+  const ses = live("sessoes").filter(s => s.feito || volumeSessao(s) > 0), car = live("cardio");
+  const val = g => {
+    const s = ses.filter(x => x.data >= g.de && x.data <= g.ate), c = car.filter(x => x.data >= g.de && x.data <= g.ate);
+    if (met === "volume") return s.reduce((a, x) => a + volumeSessao(x), 0);
+    if (met === "km") return c.reduce((a, x) => a + (+x.km || 0), 0);
+    if (met === "min") return c.reduce((a, x) => a + (+x.min || 0), 0);
+    return s.length + c.length;
+  };
+  const vs = grupos.map(val), mx = Math.max(1, ...vs), fmt = v => met === "volume" ? (v >= 1000 ? num(v / 1000, 1) + " t" : Math.round(v) + " kg") : met === "km" ? num(v, 1) : met === "min" ? Math.round(v) : String(v);
+  const media = vs.slice(0, -1).filter((_, i) => i >= vs.length - 5).reduce((a, b) => a + b, 0) / Math.max(1, Math.min(4, vs.length - 1));
+  const ult = vs[vs.length - 1];
+  const nomeMet = {treinos:"Sessões (força + cardio)", volume:"Volume de força (kg × repetições)", km:"Quilómetros de cardio", min:"Minutos de cardio"}[met];
+  return `<section class="card" aria-label="Evolução semanal e mensal">
+    <div class="card-head"><h2>Evolução ${per === "sem" ? "semanal" : "mensal"}</h2>
+      <div class="seg" role="group" aria-label="Período"><button type="button" data-a="evo-per" data-v="sem" aria-pressed="${per === "sem"}">Semanas</button><button type="button" data-a="evo-per" data-v="mes" aria-pressed="${per === "mes"}">Meses</button></div></div>
+    <div class="seg" role="group" aria-label="O que mostrar" style="align-self:flex-start;flex-wrap:wrap">${[["treinos","Sessões"],["volume","Volume"],["km","Km"],["min","Minutos"]].map(([k, l]) => `<button type="button" data-a="evo-met" data-v="${k}" aria-pressed="${met === k}">${l}</button>`).join("")}</div>
+    <div class="small muted">${nomeMet}</div>
+    <div class="chart" style="height:140px" role="img" aria-label="${nomeMet}">${grupos.map((g, i) => `<div class="col"><span class="small" style="font-weight:800;color:var(--ink)">${vs[i] ? fmt(vs[i]) : ""}</span><i class="${i === grupos.length - 1 ? "on" : ""}" style="height:${Math.max(3, vs[i] / mx * 100)}%" title="${g.lab}: ${fmt(vs[i])}"></i><span>${g.lab}</span></div>`).join("")}</div>
+    ${vs.some(v => v) ? `<div class="small">${per === "sem" ? "Esta semana" : "Este mês"}: <b>${fmt(ult)}</b> · média ${per === "sem" ? "das 4 semanas" : "dos meses"} anteriores: <b>${fmt(media)}</b>${media ? ` (${ult >= media ? "+" : "−"}${Math.abs(Math.round((ult - media) / media * 100))} %)` : ""}</div>` : '<div class="xs muted">Aparece quando registares treinos ou cardio.</div>'}
+  </section>`;
+}
+function cardioFolha(){
+  const cs = live("cardio").slice().sort((a, b) => a.data.localeCompare(b.data)), ms = medicoes(), out = [];
+  if (cs.length) out.push({nome:"Cardio", rows:[["Data","Tipo","Km","Minutos","Ritmo / velocidade","FC média","Calorias","Nota"]].concat(cs.map(c => [{d:c.data}, c.tipo, +c.km || "", +c.min || "", ritmoTxt(c), c.fc || "", c.kcal || "", c.nota || ""])), widths:[12, 12, 8, 9, 16, 9, 9, 24]});
+  if (ms.length) out.push({nome:"Peso", rows:[["Data","Peso (kg)","Gordura (%)","Músculo (kg)","Cintura (cm)","Origem"]].concat(ms.map(m => [{d:m.data}, m.peso, m.gordura || "", m.musculo || "", m.cintura || "", m.fonte === "saude" ? "Apple Saúde" : "App"])), widths:[12, 10, 11, 12, 12, 12]});
+  return out;
+}
+Object.assign(A, {
+  "add-cardio": () => dlgCardio(), "edit-cardio": el => dlgCardio(byId("cardio", el.dataset.id)),
+  "del-cardio": el => { $("#dlg").close("cancel"); remove("cardio", el.dataset.id); save(); render(); toast("Apagado."); },
+  "add-corpo": () => dlgCorpo(medicoes().slice(-1)[0] ? {} : {}),
+  "evo-per": el => { UI.evoPer = el.dataset.v; render(); }, "evo-met": el => { UI.evoMet = el.dataset.v; render(); }
+});
 
 /* ============================================================
    dia. — comando por voz e ligação Google
@@ -3616,7 +3788,7 @@ async function executarComando(texto){
   if (SEM_COMIDA.test(texto)){ V.estado = ""; V.resposta = "A comida já não faz parte da app, por isso não registei nada."; vozUI(); falar(V.resposta); return; }
   let out = null;
   /* «recebi …» é tratado aqui (receitas) */
-  if (/^\s*recebi\b/i.test(texto)) out = comandoLocal(texto);
+  if (/^\s*(recebi|corri|caminhei|andei|pedalei|nadei|remei)\b/i.test(texto)) out = comandoLocal(texto);
   if (!out && syncOn()){
     try{ out = await api("/api/comando", {texto, ctx:ctxComando()}); }
     catch(e){ if (!/IA ainda não está ligada|501/.test(e.message)) V.erro = "A IA não respondeu (" + e.message + "). Usei os comandos simples."; }
@@ -3695,6 +3867,11 @@ function comandoLocal(txt){
   if ((m = /\b(?:gastei|paguei|gasto de|despesa de)\s+([\d.,]+)\s*(?:€|euros?)?(?:\s*e\s*(\d+)\s*c[eê]ntimos?)?\s*(?:em|no|na|nos|nas|de|do|da|com|para|ao|à)?\s*(.*)$/i.exec(t))){
     const valor = r2(pnum(m[1]) + (m[2] ? +m[2] / 100 : 0)), desc = cap((m[3] || "Gasto").trim()), cat = guessCat(desc);
     return {resposta:`Registei ${eur(valor)} em ${cat}.`, acoes:[{tipo:"gasto", valor, desc, cat, data:today()}]};
+  }
+  if ((m = /^(corri|caminhei|andei|pedalei|nadei|remei)\s+([\d.,]+)\s*(?:km|quil[oó]metros?)?(?:\s+em\s+([\d.,]+)\s*(min|minutos?|h|horas?)?)?/i.exec(t))){
+    const tipo_c = {corri:"Corrida", caminhei:"Caminhada", andei:"Caminhada", pedalei:"Bicicleta", nadei:"Natação", remei:"Remo"}[m[1].toLowerCase()];
+    const km = pnum(m[2]), min = m[3] ? pnum(m[3]) * (/^h/i.test(m[4] || "") ? 60 : 1) : 0;
+    return {resposta:`Registei ${tipo_c.toLowerCase()} de ${num(km, 2)} km${min ? ` em ${durTxt(min)}` : ""}${min && km ? ` (${ritmoTxt({tipo:tipo_c, km, min})})` : ""}.`, acoes:[{tipo:"cardio", tipo_c, km, min, data:today()}]};
   }
   if ((m = /^recebi\s+([\d.,]+)\s*(?:€|euros?)?\s*(?:de|do|da|dos|das|com|pelo|pela|em)?\s*(.*)$/i.exec(t))){
     const valor = r2(pnum(m[1])), desc = cap((m[2] || "").trim()), cat = /reembols|devolu/i.test(desc) ? "Reembolso" : /vend/i.test(desc) ? "Venda" : /extra|biscate|trabalho/i.test(desc) ? "Trabalho extra" : /prenda|presente|oferta/i.test(desc) ? "Presente" : "Outros";
