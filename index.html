@@ -512,7 +512,7 @@ a.kpi:hover{outline:2px solid var(--line)}
 /* ============================================================
    dia. — núcleo: dados, datas, sincronização, horário
    ============================================================ */
-const APP_VERSION = "3.17 · 03/11/2026";
+const APP_VERSION = "3.18 · 03/11/2026";
 const KEY = "dia-app-v1";
 const VENC_KEY = "vencimento-app-v1";
 const COLS = ["tarefas","eventos","gastos","fixos","refeicoes","agua","treinos","sessoes","inbox","turnos","saude","poupObj","poupMov","poupAuto","recorr","extras","creditos","credMov","prazos","assinaturas","receitas","cardio","corpo","invest","investMov"];
@@ -799,6 +799,13 @@ function holidays(y){
 }
 const isHoliday = k => holidays(+k.slice(0, 4)).has(k.slice(5));
 /* devolve M, T, N, F, "-" (folga) ou null (sem horário) */
+/* hora do treino: com "segue o turno" ligado, manhã ou noite → à tarde; tarde ou folga → de manhã */
+function treinoPorTurno(){ return S.cfg.treinoTurno !== false; }
+function horaTreino(tr, k){
+  if (!treinoPorTurno() || !k) return (tr && tr.hora) || S.cfg.treinoHora;
+  const s = shiftOf(k);
+  return s === "M" || s === "N" ? (S.cfg.treinoTarde || "15:00") : (S.cfg.treinoManha || "09:00");
+}
 function shiftOf(k){
   const own = S.turnos.find(x => x.id === k && !x.del);
   return own ? own.s : shiftAuto(k);
@@ -826,7 +833,7 @@ function computeAgendaOut(){
   for (let i = 0; i < 35; i++){
     const k = addDays(t, i), s = shiftOf(k);
     if (isWork(s)){ const r = shiftRange(s); if (r) itens.push({id:`t-${k}`, t:`Turno ${s} · ${SHIFT_NAME[s]}`, ini:`${k}T${m2hm(r[0])}`, fim:`${r[1] >= 1440 ? addDays(k, 1) : k}T${m2hm(r[1])}`}); }
-    treinosDoDia(k).forEach(tr => { const a = hm2m(tr.hora || S.cfg.treinoHora) ?? 1050; itens.push({id:`tr-${k}-${tr.id}`, t:`Treino · ${tr.nome}`, ini:`${k}T${m2hm(a)}`, fim:`${k}T${m2hm(Math.min(a + 60, 1439))}`}); });
+    treinosDoDia(k).forEach(tr => { const a = hm2m(horaTreino(tr, k)) ?? 1050; itens.push({id:`tr-${k}-${tr.id}`, t:`Treino · ${tr.nome}`, ini:`${k}T${m2hm(a)}`, fim:`${k}T${m2hm(Math.min(a + 60, 1439))}`}); });
   }
   if (!S.agendaOut || JSON.stringify(S.agendaOut.itens) !== JSON.stringify(itens)) S.agendaOut = {upd:Date.now(), itens};
 }
@@ -1526,7 +1533,7 @@ function dayItems(k){
   const r = isWork(s) && shiftRange(s);
   if (r) out.push({cls:"tl-shift", nome:`Turno ${s} · ${m2hm(r[0])}–${m2hm(r[1])}`, ini:r[0], fim:Math.min(r[1], 1440), kind:"turno"});
   live("eventos").filter(e => e.data === k && e.hora).forEach(e => { const a = hm2m(e.hora); out.push({cls:"tl-ev", nome:e.t, ini:a, fim:a + (+e.dur || 60), kind:"ev"}); });
-  treinosDoDia(k).forEach(tr => { const a = hm2m(tr.hora || S.cfg.treinoHora) ?? 1050; const ses = sessao(k, tr.id); out.push({cls:"tl-tr", nome:/^treino/i.test(tr.nome) ? tr.nome : "Treino · " + tr.nome, ini:a, fim:a + 60, kind:"tr", done:ses && ses.feito}); });
+  treinosDoDia(k).forEach(tr => { const a = hm2m(horaTreino(tr, k)) ?? 1050; const ses = sessao(k, tr.id); out.push({cls:"tl-tr", nome:/^treino/i.test(tr.nome) ? tr.nome : "Treino · " + tr.nome, ini:a, fim:a + 60, kind:"tr", done:ses && ses.feito}); });
   return out.filter(x => x.ini != null);
 }
 function heroSentence(k){
@@ -1662,7 +1669,7 @@ function vHoje(){
       ${isT ? porDiaHtml(true) : ""}
     </div>
     <div class="card inv">
-      <div class="card-head"><h2>Treino${trs[0] ? " · " + esc(trs[0].hora || S.cfg.treinoHora) : ""}</h2>${s === "N" ? '<span class="chip c-N">Noite</span>' : ""}</div>
+      <div class="card-head"><h2>Treino${trs[0] ? " · " + esc(horaTreino(trs[0], k)) : ""}</h2>${s === "N" ? '<span class="chip c-N">Noite</span>' : ""}</div>
       ${trs.length ? `<div class="mid">${esc(trs.map(x => x.nome).join(" + "))}</div>
         <span class="small muted">${trs.reduce((a, x) => a + (x.ex || []).length, 0)} exercícios${s === "N" ? " · dia de noite: faz leve ou descansa" : ""}</span>
         <a class="btn acc" href="#treino" style="margin-top:auto">${trs.every(x => (sessao(k, x.id) || {}).feito) ? "Feito ✓ · ver" : isT ? "Começar" : "Ver treino"}</a>`
@@ -1881,7 +1888,7 @@ function vTreino(){
     return `<div class="wd ${k === t ? "today" : ""} ${k === d0 && !isT ? "sel" : ""}"><span class="xs">${DOW3[pdk(k).getDay()]} · <span class="chip ${chipCls(s)}" style="padding:1px 6px">${chipTxt(s)}</span></span>
       <b class="small hide-m">${trs.length ? esc(trs.map(x => x.nome).join(" + ")) : "Descanso"}${done ? " ✓" : ""}</b>
       <span class="show-m">${trs.length ? `<span class="chip ${done ? "c-ok" : "c-ia"}" style="padding:1px 6px" title="${esc(trs.map(x => x.nome).join(" + "))}">${done ? "✓" : "T"}</span>` : '<span class="xs muted">—</span>'}</span>
-      <span class="xs hide-m">${trs.length ? (s === "N" ? "Noite: leve ou descanso" : esc(trs[0].hora || S.cfg.treinoHora)) : ""}</span></div>`;
+      <span class="xs hide-m">${trs.length ? esc(horaTreino(trs[0], k)) : ""}</span></div>`;
   }).join("");
   const hojeTr = treinosDoDia(d0);
   const selId = UI.treinoSel[d0] || (hojeTr[0] && hojeTr[0].id) || (plano[0] && plano[0].id);
@@ -1948,7 +1955,7 @@ function vTreino(){
       ${evolucaoGeralCard()}
       <section class="card">
         <h2>O meu plano</h2>
-        <div class="list">${plano.map(p => `<div class="item"><div class="grow"><div class="t">${esc(p.nome)}</div><div class="s">${(p.dias || []).map(d => DOW3[d]).join(", ") || "sem dias"} · ${esc(p.hora || S.cfg.treinoHora)} · ${(p.ex || []).map(e => esc(e.n)).join(", ")}</div></div>
+        <div class="list">${plano.map(p => `<div class="item"><div class="grow"><div class="t">${esc(p.nome)}</div><div class="s">${(p.dias || []).map(d => DOW3[d]).join(", ") || "sem dias"} · ${treinoPorTurno() ? "hora pelo turno" : esc(p.hora || S.cfg.treinoHora)} · ${(p.ex || []).map(e => esc(e.n)).join(", ")}</div></div>
           <button class="linkbtn" type="button" data-a="edit-treino" data-id="${p.id}">Editar</button><button class="x" type="button" data-a="del" data-col="treinos" data-id="${p.id}" aria-label="Apagar treino">${ic("x", 16)}</button></div>`).join("") || '<div class="empty">Sem treinos. Cria um, usa o plano de exemplo ou arrasta o plano do teu PT para a IA.</div>'}</div>
       </section>
     </div>
@@ -2114,7 +2121,9 @@ function vDef(){
     <details class="card fold" data-fold="horas" ${UI.fold && UI.fold["horas"] ? "open" : ""}>
       <summary><h2>Horas dos turnos</h2></summary>
       <div class="fields">${["M","T","N"].map(s => `<label class="field">Início ${s}<input type="time" data-c="hora" data-s="${s}" data-i="0" value="${esc(c.horas[s][0])}"></label><label class="field">Fim ${s}<input type="time" data-c="hora" data-s="${s}" data-i="1" value="${esc(c.horas[s][1])}"></label>`).join("")}</div>
-      <label class="field">Hora habitual do treino<input type="time" data-c="cfg" data-k="treinoHora" value="${esc(c.treinoHora)}"></label>
+      <label class="item" style="border:0;min-height:40px"><input class="check" type="checkbox" data-c="cfg-bool-r" data-k="treinoTurno" ${c.treinoTurno !== false ? "checked" : ""}> <span class="small" style="font-weight:700">Hora do treino segue o turno: manhã ou noite → treino à tarde; tarde ou folga → treino de manhã</span></label>
+      ${c.treinoTurno !== false ? `<div class="fields"><label class="field">Treino de manhã<input type="time" data-c="cfg" data-k="treinoManha" value="${esc(c.treinoManha || "09:00")}"></label><label class="field">Treino à tarde<input type="time" data-c="cfg" data-k="treinoTarde" value="${esc(c.treinoTarde || "15:00")}"></label></div>`
+        : `<label class="field">Hora habitual do treino<input type="time" data-c="cfg" data-k="treinoHora" value="${esc(c.treinoHora)}"></label>`}
     </details>
 
     <section class="card">
@@ -2470,7 +2479,7 @@ function dlgRefeicao(r = {}){
 }
 function dlgTreino(p = {}){
   const exTxt = (p.ex || []).map(e => `${e.n}; ${e.s}; ${e.r}`).join("\n");
-  openDlg(p.id ? "Editar treino" : "Novo treino", `<div class="fields"><label class="field">Nome<input name="nome" required value="${esc(p.nome || "")}" placeholder="Ex.: Peito e tríceps"></label><label class="field">Hora<input type="time" name="hora" value="${esc(p.hora || S.cfg.treinoHora)}"></label></div>
+  openDlg(p.id ? "Editar treino" : "Novo treino", `<div class="fields"><label class="field">Nome<input name="nome" required value="${esc(p.nome || "")}" placeholder="Ex.: Peito e tríceps"></label>${treinoPorTurno() ? `<input type="hidden" name="hora" value="${esc(p.hora || S.cfg.treinoHora)}"></div><p class="xs muted" style="margin:0">Hora pelo turno: manhã ou noite → ${esc(S.cfg.treinoTarde || "15:00")}; tarde ou folga → ${esc(S.cfg.treinoManha || "09:00")}. Muda em Definições → Horas dos turnos.</p>` : `<label class="field">Hora<input type="time" name="hora" value="${esc(p.hora || S.cfg.treinoHora)}"></label></div>`}
     <fieldset class="field" style="border:0;padding:0;margin:0"><legend style="margin-bottom:6px">Dias da semana</legend><div style="display:flex;gap:6px;flex-wrap:wrap">${[1,2,3,4,5,6,0].map(d => `<label class="btn sm ghost" style="gap:6px"><input type="checkbox" name="dias" value="${d}" ${(p.dias || []).includes(d) ? "checked" : ""}> ${DOW3[d]}</label>`).join("")}</div></fieldset>
     <label class="field">Exercícios — um por linha: nome; séries; repetições<textarea name="ex" rows="6" placeholder="Supino plano; 4; 8&#10;Aberturas; 3; 12">${esc(exTxt)}</textarea></label>`,
   o => {
@@ -3497,6 +3506,10 @@ function conselhoTreino(k){
   const trs = treinosDoDia(k).filter(x => !(sessao(k, x.id) || {}).feito);
   if (!trs.length) return null;
   const s = shiftOf(k), ontem = shiftOf(addDays(k, -1)), nome = trs.map(x => x.nome).join(" + "), r = isWork(s) && shiftRange(s);
+  if (treinoPorTurno()){
+    const h = horaTreino(trs[0], k), sub = {M:"Trabalhas de manhã: treino à tarde.", N:`Trabalhas à noite${r ? ` (entras às ${m2hm(r[0])})` : ""}: treino à tarde.`, T:`Trabalhas à tarde${r ? ` (entras às ${m2hm(r[0])})` : ""}: treino de manhã.`}[s] || "Dia de folga: treino de manhã.";
+    return {txt:`${nome} às ${h}`, sub, nivel:"media"};
+  }
   if (s === "N") return {txt:`${nome}: hoje és de noite`, sub:"Faz um treino leve antes do turno ou descansa.", nivel:"info"};
   if (ontem === "N") return {txt:`${nome} depois de uma noite`, sub:"Descansa primeiro; treina ao fim da tarde se te sentires bem.", nivel:"info"};
   if (s === "T" && r) return {txt:`${nome} antes do turno`, sub:`Entras às ${m2hm(r[0])}: treina de manhã, até às ${m2hm(r[0] - 75)}.`, nivel:"media"};
@@ -3750,7 +3763,7 @@ function conflitos(de, ate){
     /* compromissos de madrugada logo a seguir a uma noite também caem no turno */
     if (ontem && ontem.b > 1440) evs.filter(e => e.hora && e.data === k && k === de).forEach(e => { const a = hm2m(e.hora) + 1440, b = a + (+e.dur || 60); if (a < ontem.b && b > ontem.a) out.push({k, tipo:"evento", txt:`${e.t} às ${e.hora} coincide com o fim da noite`, sub:`Turno da noite até às ${m2hm(ontem.b)}`}); });
     /* treino planeado à hora do turno */
-    if (it) treinosDoDia(k).forEach(tr => { const a = hm2m(tr.hora || S.cfg.treinoHora); if (a == null) return; if (a + 60 > it.a && a < it.b) out.push({k, tipo:"treino", txt:`${tr.nome} às ${m2hm(a)} calha no turno`, sub:`${shortDate(k)}: turno da ${SHIFT_NAME[it.s]} ${m2hm(it.a)}–${m2hm(it.b)}`}); });
+    if (it) treinosDoDia(k).forEach(tr => { const a = hm2m(horaTreino(tr, k)); if (a == null) return; if (a + 60 > it.a && a < it.b) out.push({k, tipo:"treino", txt:`${tr.nome} às ${m2hm(a)} calha no turno`, sub:`${shortDate(k)}: turno da ${SHIFT_NAME[it.s]} ${m2hm(it.a)}–${m2hm(it.b)}`}); });
     /* descanso curto até ao turno seguinte */
     if (it){
       const prox = intervaloTurno(addDays(k, 1));
@@ -3782,7 +3795,7 @@ function semanaHtml(ref){
       <button type="button" class="wkhead" data-a="day" data-k="${k}"><b>${DOW3[pdk(k).getDay()]} ${pdk(k).getDate()}</b><span class="chip ${chipCls(s)}">${s ? (isWork(s) ? `${s} ${m2hm(it.a)}–${m2hm(it.b)}` : shiftLabel(s)) : "—"}</span>${isHoliday(k) ? '<span class="chip c-alta">Feriado</span>' : ""}</button>
       <div class="wkitems">
         ${evs.map(e => `<div class="wki"><span class="xs muted">${esc(e.hora || "dia")}</span> ${esc(e.t)}</div>`).join("")}
-        ${trs.map(tr => `<div class="wki"><span class="xs muted">${esc(tr.hora || S.cfg.treinoHora)}</span> 🏋 ${esc(tr.nome)}${(sessao(k, tr.id) || {}).feito ? " ✓" : ""}</div>`).join("")}
+        ${trs.map(tr => `<div class="wki"><span class="xs muted">${esc(horaTreino(tr, k))}</span> 🏋 ${esc(tr.nome)}${(sessao(k, tr.id) || {}).feito ? " ✓" : ""}</div>`).join("")}
         ${cardio.map(c => `<div class="wki">🏃 ${esc(c.tipo)}${+c.km ? " " + num(c.km, 1) + " km" : ""}</div>`).join("")}
         ${tar.slice(0, 3).map(x => `<div class="wki"><span class="xs muted">${esc(x.hora || "")}</span> ☐ ${esc(x.t)}</div>`).join("")}${tar.length > 3 ? `<div class="xs muted">+${tar.length - 3} tarefas</div>` : ""}
         ${cf.map(c => `<div class="wki warn" title="${esc(c.txt + " · " + c.sub)}">⚠ ${{evento:"compromisso no turno", treino:"treino no turno", descanso:"pouco descanso"}[c.tipo]}</div>`).join("")}
