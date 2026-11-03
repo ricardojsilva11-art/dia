@@ -512,7 +512,7 @@ a.kpi:hover{outline:2px solid var(--line)}
 /* ============================================================
    dia. — núcleo: dados, datas, sincronização, horário
    ============================================================ */
-const APP_VERSION = "3.16 · 03/11/2026";
+const APP_VERSION = "3.17 · 03/11/2026";
 const KEY = "dia-app-v1";
 const VENC_KEY = "vencimento-app-v1";
 const COLS = ["tarefas","eventos","gastos","fixos","refeicoes","agua","treinos","sessoes","inbox","turnos","saude","poupObj","poupMov","poupAuto","recorr","extras","creditos","credMov","prazos","assinaturas","receitas","cardio","corpo","invest","investMov"];
@@ -910,7 +910,7 @@ function vNum(v, nome, o = {}){
 }
 function vData(k, nome = "a data", opc){
   if (!k){ if (opc) return ""; throw new Error(`Indica ${nome}.`); }
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(k) || isNaN(pdk(k)) || k < "2000-01-01" || k > "2100-12-31") throw new Error(`${nome[0].toUpperCase() + nome.slice(1)} não é válida.`);
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(k) || isNaN(pdk(k)) || dk(pdk(k)) !== k || k < "2000-01-01" || k > "2100-12-31") throw new Error(`${nome[0].toUpperCase() + nome.slice(1)} não é válida.`);
   return k;
 }
 /* antes de mudar de versão, guarda uma cópia dos dados deste aparelho */
