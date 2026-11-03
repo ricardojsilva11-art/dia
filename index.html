@@ -471,7 +471,7 @@ details.fold:not([open]){gap:0}
 /* ============================================================
    dia. — núcleo: dados, datas, sincronização, horário
    ============================================================ */
-const APP_VERSION = "3.9 · 02/11/2026";
+const APP_VERSION = "3.10 · 03/11/2026";
 const KEY = "dia-app-v1";
 const VENC_KEY = "vencimento-app-v1";
 const COLS = ["tarefas","eventos","gastos","fixos","refeicoes","agua","treinos","sessoes","inbox","turnos","saude","poupObj","poupMov","poupAuto","recorr","extras","creditos","credMov","prazos","assinaturas","receitas"];
@@ -617,17 +617,57 @@ async function api(path, body){
   if (!r.ok) throw new Error((j && j.error) || `Erro ${r.status}`);
   return j;
 }
+/* sincronização leve (v3.10): envia só o que mudou desde o último envio e recebe só o que mudou no servidor */
+const SINGLE_KEYS = ["cfg","venc","agendaOut","gstatus","analise"];
+function mudancasLocais(desde){
+  const mud = {}, sg = {};
+  Object.keys(S).forEach(c => {
+    if (c === "local" || !Array.isArray(S[c])) return;
+    const arr = S[c].filter(x => x && (x.upd || 0) > desde);
+    if (arr.length) mud[c] = arr;
+  });
+  SINGLE_KEYS.forEach(k => { if (S[k] && (S[k].upd || 0) > desde) sg[k] = S[k]; });
+  return {mud, sg};
+}
+async function syncLeve(sy){
+  const t0 = Date.now(), {mud, sg} = mudancasLocais(sy.envAte || 0);
+  let desde = sy.rev || 0, voltas = 0, j;
+  do {
+    j = await api("/api/sync2", {desde, mudancas:voltas ? {} : mud, singles:voltas ? {} : sg});
+    const b = Object.assign({}, j.mudancas || {});
+    SINGLE_KEYS.forEach(k => { if (j.singles && j.singles[k]) b[k] = j.singles[k]; });
+    if (!b.cfg) b.cfg = null;
+    S = mergeState(S, b);
+    desde = j.rev; voltas++;
+  } while (j.mais && voltas < 50);
+  sy = S.local.sync; sy.rev = desde; sy.envAte = t0; sy.modo = "v2";
+  const c = j.contagem || {};
+  sy.server = {tarefas:c.tarefas || 0, gastos:c.gastos || 0, treinos:c.treinos || 0, receitas:c.receitas || 0, venc:!!S.venc};
+}
 async function syncNow(manual){
   if (!syncOn() || syncBusy) return;
   syncBusy = true; setSyncUI("busy", "A sincronizar…");
   try{
     computeAgendaOut();
     const before = JSON.stringify(payload());
-    const j = await api("/api/sync", {data:payload()});
-    S = mergeState(S, j.data);
+    let leve = S.local.sync.modo !== "v1";
+    if (leve){
+      try{ await syncLeve(S.local.sync); }
+      catch(e){
+        /* servidor ainda sem a versão nova: usa a sincronização antiga */
+        if (/Endereço desconhecido|404|501|fallback/i.test(e.message || "")){ leve = false; S.local.sync.modo = "v1"; S.local.sync.v1Em = Date.now(); }
+        else throw e;
+      }
+    }
+    if (!leve){
+      const j = await api("/api/sync", {data:payload()});
+      S = mergeState(S, j.data);
+      const d = j.data || {}, n = c => (d[c] || []).filter(x => !x.del).length;
+      S.local.sync.server = {tarefas:n("tarefas"), gastos:n("gastos"), treinos:n("treinos"), receitas:n("receitas"), venc:!!d.venc};
+      /* volta a tentar a sincronização leve de hora a hora (depois de atualizares o servidor) */
+      if (Date.now() - (S.local.sync.v1Em || 0) > 3600e3) S.local.sync.modo = "";
+    }
     if (ensureRecorr()) setTimeout(() => save(), 0);
-    const d = j.data || {}, n = c => (d[c] || []).filter(x => !x.del).length;
-    S.local.sync.server = {tarefas:n("tarefas"), gastos:n("gastos"), treinos:n("treinos"), refeicoes:n("refeicoes"), venc:!!d.venc};
     S.local.sync.last = Date.now(); S.local.sync.err = "";
     persist();
     if (JSON.stringify(payload()) !== before) softRender();
@@ -2008,7 +2048,7 @@ function vDef(){
       <label class="field">Código pessoal<input data-c="sync" data-k="code" value="${esc(sy.code)}" placeholder="XXXX-XXXX-XXXX-XXXX" autocomplete="off" spellcheck="false"></label>
       <div style="display:flex;gap:8px;flex-wrap:wrap"><button class="btn ghost sm" type="button" data-a="gen-code">Gerar código novo</button><button class="btn sm" type="button" data-a="sync-now" ${syncOn() ? "" : "disabled"}>Sincronizar agora</button></div>
       ${sy.err ? `<span class="small" style="color:var(--red)">${esc(sy.err)}</span>` : sy.last ? `<span class="xs muted">Última sincronização: ${new Date(sy.last).toLocaleString("pt-PT")}</span>` : ""}
-      ${sy.code ? `<div class="small" style="background:var(--soft);border-radius:12px;padding:10px 12px">Para confirmar que os dois aparelhos usam o mesmo código: este termina em <b class="mono">${esc(sy.code.slice(-4))}</b>.${sy.server ? ` No servidor, com este código, estão <b>${sy.server.tarefas}</b> tarefas, <b>${sy.server.gastos}</b> gastos, <b>${sy.server.refeicoes}</b> refeições e <b>${sy.server.treinos}</b> treinos.` : ""}</div>` : ""}
+      ${sy.code ? `<div class="small" style="background:var(--soft);border-radius:12px;padding:10px 12px">Para confirmar que os dois aparelhos usam o mesmo código: este termina em <b class="mono">${esc(sy.code.slice(-4))}</b>.${sy.server ? ` No servidor, com este código, estão <b>${sy.server.tarefas}</b> tarefas, <b>${sy.server.gastos}</b> gastos e <b>${sy.server.treinos}</b> treinos. ${sy.modo === "v2" ? "Sincronização leve ligada (só envia o que muda)." : sy.modo === "v1" ? '<span style="color:var(--amber-ink);font-weight:700">O servidor ainda tem a versão antiga: atualiza o worker.js para a sincronização leve.</span>' : ""}` : ""}</div>` : ""}
     </section>
 
     <section class="card">
